@@ -1,0 +1,87 @@
+File: ParticleDisplay2D.cs:
+
+Classes: ParticleDisplay2D
+Purpose: Handles the rendering of the particles for the 2D fluid simulation
+Functions: Init(ParticleSimulator sim), LateUpdate(), UpdateSettings(), OnDestroy()
+
+Init(ParticleSimulator sim): Creates a material from a shader, setting the buffers used for the particles rendering (position and velocity) to read from the simulation's compute shader buffers.
+LateUpdate(): The function responsible for actually rendering the particles. Uses Graphics.DrawMeshInstancedIndirect()
+UpdateSettings(): changes any settings in the material when necessary
+OnDestroy: releases the argument buffer used in the shader (good practice to clear memory when the program is closed)
+
+
+
+
+
+File: ParticleSimulator.cs
+
+Classes: ParticleSimulator
+Purpose: runs the kernels in the compute shader for performing the calculations each frame for simulating fluid behaviour
+Functions: Start(), Update(), RunSimulationFrame(float, frameTime), RunSimulationStep(), UpdateComputeSettings(float deltaTime), SetInitialBufferData(ParticleSpawner.ParticleSpawnData spawnData), OnDestroy(), OnDrawGizmos()
+
+Start(): Responsible for initialisation. It retrieves the spawn data of the particles and sets all the variables in the compute shader before telling the ParticleDisplay2D to initialise
+Update(): Runs the simulation each frame.
+RunSimulationFrame(float frameTime): Updates the settings in the compute shader (usually just the time elapsed), runs the simulation step then runs an event on completion of the simulation step
+UpdateComputeSettings(float deltaTime): Updates all the variables in the compute shader. This function only changes variables that are intended to be editable while the program is running
+SetInitialBufferData(ParticleSpawner.ParticleSpawnData spawnData): sets the values stored in the buffers of the compute shader to match the spawn data.
+OnDestroy(): Releases all of the buffers stored in the compute shader (good practice to clear memory when the program is closed)
+OnDrawGizmos(): Draws a wireframe square to represent the container of the fluid
+
+
+
+
+File: ParticleSpawner.cs
+
+Classes: ParticleSpawner
+Structs: ParticleSpawnData (float2[] positions, float2[] velocities)
+Purpose: Initialise the spawn position and velocities of the particles for the fluid simulation
+Functions: GetSpawnData(), OnDrawGizmos()
+
+GetSpawnData(): Returns a struct containing two arrays of float2s for the position coordinates and velocities of the fluids for the start of the simulation
+OnDrawGizmos(): Draws the bounds within which the particles will be spawned when the simulation is not running
+
+
+
+
+File: ComputeHelper.cs
+
+classes: ComputeHelper (static class)
+Purpose: Modulises compute shader functionality for improved readability and clarity in the other files that use compute shaders
+Functions: Dispatch, GetThreadGroupSizes, GetStride<T>, CreateStructuredBuffer<T>, SetBuffer, Release, CreateArgsBuffer
+
+Dispatch: Takes in the compute shader, number of x iterations and the kernel to run as parameters. It dispatches that kernel on the compute shader with the correct number of thread groups
+GetThreadGroupSizes: Takes in a compute shader and kernel as parameters. It returns the thread group size as a vector 3
+GetStride<T>: returns the length in bytes of a variable of type T
+CreateStructuredBuffer<T>:takes in an int for the size of the buffer. It then returns a computeBuffer that can store that amount of the data type T
+SetBuffer: Takes in a compute shader, buffer, buffer name and a list of kernels as parameters. It then sets the value of that buffer for each of the given kernels in the compute shaders
+Release: Takes in a list of computeBuffers as parameters. It then clears the memory of each of those buffers
+CreateArgsBuffer: Takes in a mesh and an int as parameters. It creates and returns a computeBuffer that can be used for rendering that mesh with the DrawMeshInstancedIndirect() function.
+
+
+
+
+
+File: LiquidSimulator2D.compute
+
+Kernels: ApplyForces, UpdatePositions
+purpose: Perform all the calculations to simulate fluid behaviour of particles
+Buffers: Positions(RW), Velocities(RW)
+Settings: gravity, damping, bounds
+Functions: ExternalForces, HandleCollisions
+
+Kernel purposes:
+ApplyForces: updates the velocity buffer, applying accelerations to each particle for this simulation frame (applies gravity)
+UpdatePositions: updates the position buffer, applying the final velocity of each particle for this simulation frame
+
+Function:
+ExternalForces: Takes in a float2 for a position and velocity. returns the resultant acceleration to apply to a particle in that position.
+HandleCollisions: Takes in a int for the particle index. Checks if that particle has collided with the bounds (does not check for particle-particle collision). If it has then its velocity and position is changed to keep it within.
+
+
+
+
+File: Particle2D.shader
+Buffers: positions, velocities
+vertex shader: calculates the vertex's position in its local coordinates and passes that to the fragment shader
+fragment shader: calculates the colour to set the fragment to. If its within the circle then the colour is based on the velocity. If it isn't then the colour is set to have an alpha of 0 (transparent background)
+
