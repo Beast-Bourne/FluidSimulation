@@ -56,9 +56,9 @@ public class ParticleSimulator3D : MonoBehaviour
         spawnData = spawner.GetSpawnData();
         particleCount = spawnData.positions.Length;
 
-        positionBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
-        predictedPositionBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
-        velocityBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
+        positionBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
+        predictedPositionBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
+        velocityBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
         densityBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
         spatialIndices = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
         spatialOffsets = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
@@ -120,8 +120,8 @@ public class ParticleSimulator3D : MonoBehaviour
     void RunSimulationStep()
     {
         ComputeHelper.Dispatch(compute, particleCount, externalForceKernel);
-        ComputeHelper.Dispatch(compute, particleCount, gridHashKernel);
-        sorter.SortAndCalcOffsets();
+        //ComputeHelper.Dispatch(compute, particleCount, gridHashKernel);
+        //sorter.SortAndCalcOffsets();
         ComputeHelper.Dispatch(compute, particleCount, densityCalculationKernel);
         ComputeHelper.Dispatch(compute, particleCount, pressureForceKernel);
         ComputeHelper.Dispatch(compute, particleCount, viscosityKernel);
@@ -161,7 +161,7 @@ public class ParticleSimulator3D : MonoBehaviour
     // Sets the initial buffer data for the simulation
     void SetInitialBufferData(ParticleSpawner3D.ParticleSpawnData spawnData)
     {
-        float2[] allPoints = new float2[spawnData.positions.Length]; // This prevents the modification of the inital spawn data
+        float3[] allPoints = new float3[spawnData.positions.Length]; // This prevents the modification of the inital spawn data
         System.Array.Copy(spawnData.positions, allPoints, spawnData.positions.Length);
 
         positionBuffer.SetData(allPoints);

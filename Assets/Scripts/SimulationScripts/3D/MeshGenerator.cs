@@ -14,7 +14,7 @@ public static class MeshGenerator
         int numDivisions = Mathf.Max(0, res);
         int temp = numDivisions + 3;
         int vertsPerFace = (temp * temp - temp) / 2;
-        int totalVerts = (vertsPerFace * 8) - ((numDivisions + 2) * 12) + 6;
+        int totalVerts = (vertsPerFace * 8) - (numDivisions + 2) * 12 + 6;
         int trisPerFace = (numDivisions + 1) * (numDivisions + 1);
 
         var verts = new FixedLengthList<Vector3>(totalVerts);
@@ -64,7 +64,7 @@ public static class MeshGenerator
             var vertMap = new FixedLengthList<int>(vertsPerFace);
             vertMap.Add(sideA.vertIndices[0]); // top of the tri
 
-            for (int i = 1; i < totalEdgeDivisions; i++)
+            for (int i = 1; i < totalEdgeDivisions - 1; i++)
             {
                 vertMap.Add(sideA.vertIndices[i]);
 

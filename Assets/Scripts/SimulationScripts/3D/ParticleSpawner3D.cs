@@ -5,45 +5,39 @@ using UnityEngine;
 
 public class ParticleSpawner3D : MonoBehaviour
 {
-    public int particleCount;
+    public int particlesPerSide;
+    public Vector3 spawnCentre;
+    public float spawnSize;
 
-    public Vector2 spawnCentre;
-    public Vector2 spawnSize;
-
-    public struct ParticleSpawnData
-    {
-        public float2[] positions;
-        public float2[] velocities;
-
-        // Constructor
-        public ParticleSpawnData(int num)
-        {
-            positions = new float2[num];
-            velocities = new float2[num];
-        }
-    }
+    public Vector3 startingVelocity;
+    public float randomOffsetStrength;
 
     // returns the spawn data for the particles to start at
     public ParticleSpawnData GetSpawnData()
     {
-        ParticleSpawnData data = new ParticleSpawnData(particleCount);
+        ParticleSpawnData data = new ParticleSpawnData(particlesPerSide * particlesPerSide * particlesPerSide);
 
-        int numX = Mathf.CeilToInt(Mathf.Sqrt(spawnSize.x / spawnSize.y * particleCount + (spawnSize.x - spawnSize.y)*(spawnSize.x - spawnSize.y) / (4 * spawnSize.y * spawnSize.y)) - (spawnSize.x - spawnSize.y) / (2*spawnSize.y));
-        int numY = Mathf.CeilToInt(particleCount / (float)numX);
         int particleNum = 0;
 
-        for (int y = 0; y < numY; y++)
+        for (int x = 0; x < particlesPerSide; x++)
         {
-            for (int x = 0; x < numX; x++)
+            for (int y = 0; y < particlesPerSide; y++)
             {
-                if (particleNum >= particleCount) break;
+                for (int z = 0; z < particlesPerSide; z++)
+                {
+                    float tx = x / (particlesPerSide - 1f);
+                    float ty = y / (particlesPerSide - 1f);
+                    float tz = z / (particlesPerSide - 1f);
 
-                float tx = numX <= 1 ? 0.5f : x / (float)(numX - 1);
-                float ty = numY <= 1 ? 0.5f : y / (float)(numY - 1);
-                data.positions[particleNum] = new Vector2((tx-0.5f) * spawnSize.x, (ty - 0.5f) * spawnSize.y) + spawnCentre;
-                data.velocities[particleNum] = Vector2.zero;
+                    float px = (tx - 0.5f) * spawnSize + spawnCentre.x;
+                    float py = (ty - 0.5f) * spawnSize + spawnCentre.y;
+                    float pz = (tz - 0.5f) * spawnSize + spawnCentre.z;
 
-                particleNum++;
+                    float3 randOffset = UnityEngine.Random.insideUnitSphere * randomOffsetStrength;
+                    data.positions[particleNum] = new float3(px, py, pz) + randOffset;
+                    data.velocities[particleNum] = startingVelocity;
+                    particleNum++;
+                }
             }
         }
 
@@ -56,7 +50,20 @@ public class ParticleSpawner3D : MonoBehaviour
         if (!Application.isPlaying)
         {
             Gizmos.color = Color.green;
-            Gizmos.DrawWireCube(spawnCentre, spawnSize);
+            Gizmos.DrawWireCube(spawnCentre, Vector3.one * spawnSize);
+        }
+    }
+
+    public struct ParticleSpawnData
+    {
+        public float3[] positions;
+        public float3[] velocities;
+
+        // Constructor
+        public ParticleSpawnData(int num)
+        {
+            positions = new float3[num];
+            velocities = new float3[num];
         }
     }
 }
