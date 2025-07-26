@@ -7,8 +7,8 @@
 #pragma kernel UpdatePositions
 
 // Includes
-#include "./GridHelper.hlsl"
-#include "./ShaderMaths.hlsl"
+#include "../GridHelper.hlsl"
+#include "../ShaderMaths.hlsl"
 
 static const int threadCount = 64;
 
