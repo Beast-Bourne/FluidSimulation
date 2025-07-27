@@ -182,7 +182,7 @@ Transform:
   m_GameObject: {fileID: 201853420}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1.3460307, y: -1.1030259, z: -0.040390953}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -217,7 +217,7 @@ Transform:
   m_GameObject: {fileID: 300039692}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -1.3460307, y: 1.1030259, z: 0.040390953}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -235,9 +235,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c1f06fb2a8c1b6747aa3092981adfe6b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particleCount: 5000
-  spawnCentre: {x: 0, y: 0}
-  spawnSize: {x: 12, y: 7}
+  particlesPerSide: 20
+  spawnCentre: {x: 0, y: 0, z: 0}
+  spawnSize: 1
+  startingVelocity: {x: 0, y: 0, z: 0}
+  randomOffsetStrength: 0.5
 --- !u!1 &342247391
 GameObject:
   m_ObjectHideFlags: 0
@@ -599,8 +601,8 @@ Transform:
   m_GameObject: {fileID: 1220108972}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -1.3460307, y: 1.1030259, z: 0.040390953}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 3, y: 3, z: 3}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 201853421}
@@ -620,9 +622,9 @@ MonoBehaviour:
   spawner: {fileID: 300039694}
   display: {fileID: 2142746231}
   compute: {fileID: 7200000, guid: 25ca8b141b0859e48b45fb8845db4a78, type: 3}
+  floorDisplay: {fileID: 0}
   fixedTimeStep: 0
   timeScale: 0.2
-  boundSize: {x: 16, y: 9}
   gravity: -8
   damping: 0.8
   smoothingRadius: 0.5
@@ -856,7 +858,7 @@ Transform:
   m_GameObject: {fileID: 2142746229}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -1.3460307, y: 1.1030259, z: 0.040390953}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -874,9 +876,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 90325721f7f66054c9fc4e5d7cad9684, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mesh: {fileID: 10210, guid: 0000000000000000e000000000000000, type: 0}
   shader: {fileID: 4800000, guid: c710d2ab470f8914fbdc5ccdeeb0a7a6, type: 3}
+  meshRes: 50
+  mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   scale: 0.05
+  colour: {r: 0.07287896, g: 1, b: 0, a: 0}
   colourMap:
     serializedVersion: 2
     key0: {r: 0, g: 0.07058668, b: 1, a: 1}

@@ -25,7 +25,8 @@ RWStructuredBuffer<uint> SpatialOffsets;
 const uint numParticles;
 const float gravity;
 const float deltaTime;
-const float3 bounds;
+const float3 boundSize;
+const float3 boundCentre;
 const float damping;
 const float smoothingRadius;
 const float targetDensity;
@@ -33,11 +34,6 @@ const float pressureMultiplier;
 const float nearPressureMultiplier;
 const float viscocityMultiplier;
 const bool usePredictions;
-
-// mouse interaction constants
-const float2 mousePos;
-const float mouseRadius;
-const float interactionStrength;
 
 const float4x4 worldToLocal;
 const float4x4 localToWorld;
@@ -112,7 +108,7 @@ void HandleCollisions(int particleIndex)
     float3 pos = mul(worldToLocal, float4(Positions[particleIndex], 1)).xyz;
     float3 vel = mul(worldToLocal, float4(Velocities[particleIndex], 0)).xyz;
     
-    const float3 halfSize = bounds * 0.5f;
+    const float3 halfSize = 0.5f;
     float3 edgeDist = halfSize - abs(pos);
     
     if (edgeDist.x < 0)
