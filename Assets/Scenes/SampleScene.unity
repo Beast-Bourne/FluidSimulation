@@ -235,9 +235,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c1f06fb2a8c1b6747aa3092981adfe6b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particlesPerSide: 30
+  particlesPerSide: 50
   spawnCentre: {x: 0, y: 0, z: 0}
-  spawnSize: 1
+  spawnSize: 9
   startingVelocity: {x: 0, y: 0, z: 0}
   randomOffsetStrength: 0.5
 --- !u!1 &342247391
@@ -602,7 +602,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 10, y: 10, z: 10}
+  m_LocalScale: {x: 100, y: 40, z: 40}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 201853421}
@@ -622,7 +622,6 @@ MonoBehaviour:
   spawner: {fileID: 300039694}
   display: {fileID: 2142746231}
   compute: {fileID: 7200000, guid: 25ca8b141b0859e48b45fb8845db4a78, type: 3}
-  floorDisplay: {fileID: 0}
   fixedTimeStep: 0
   timeScale: 0.2
   gravity: -8
@@ -635,6 +634,13 @@ MonoBehaviour:
   mouseForceStrength: 40
   mouseRadius: 3
   usePredictions: 1
+  celestialBodies:
+  - position:
+      x: 20
+      y: 0
+      z: 0
+    radius: 5
+    mass: 10
   isPaused: 1
 --- !u!1 &1374176186
 GameObject:
@@ -877,7 +883,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   shader: {fileID: 4800000, guid: c710d2ab470f8914fbdc5ccdeeb0a7a6, type: 3}
-  meshRes: 50
+  meshRes: 35
   mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   scale: 0.05
   colour: {r: 0.07287896, g: 1, b: 0, a: 0}

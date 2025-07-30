@@ -128,8 +128,8 @@ public class ParticleSimulator3D : MonoBehaviour
     void RunSimulationStep()
     {
         ComputeHelper.Dispatch(compute, particleCount, externalForceKernel);
-        //ComputeHelper.Dispatch(compute, particleCount, gridHashKernel);
-        //sorter.SortAndCalcOffsets();
+        ComputeHelper.Dispatch(compute, particleCount, gridHashKernel);
+        sorter.SortAndCalcOffsets();
         ComputeHelper.Dispatch(compute, particleCount, densityCalculationKernel);
         ComputeHelper.Dispatch(compute, particleCount, pressureForceKernel);
         ComputeHelper.Dispatch(compute, particleCount, viscosityKernel);

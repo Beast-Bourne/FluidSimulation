@@ -7,39 +7,40 @@ public class BufferSorter
     const int offsetKernel = 1;
 
     readonly ComputeShader sortCompute;
-    ComputeBuffer indexBuffer;
+    int indexBufferCount;
+    int sortStageCount;
 
     public BufferSorter()
     {
         sortCompute = ComputeHelper.LoadComputeShader("GridSorter");
     }
 
+    // the index and offset buffers are passed into here from the ParticleSimulator3D script and set as the buffers for the sort compute shader
+    // compute shaders can share buffer data and both will see changes made by the other shader to that buffer
     public void SetBuffers(ComputeBuffer indexBuffer, ComputeBuffer offsetBuffer)
     {
-        this.indexBuffer = indexBuffer;
+        indexBufferCount = indexBuffer.count;
 
-        sortCompute.SetBuffer(sortKernel, "Entries", indexBuffer);
         ComputeHelper.SetBuffer(sortCompute, offsetBuffer, "Offsets", offsetKernel);
-        ComputeHelper.SetBuffer(sortCompute, indexBuffer, "Entries", offsetKernel);
+        ComputeHelper.SetBuffer(sortCompute, indexBuffer, "Entries", offsetKernel, sortKernel);
+
+        sortCompute.SetInt("numEntries", indexBufferCount);
+        sortStageCount = (int)Log(NextPowerOfTwo(indexBufferCount), 2);
     }
 
-    // This function sorts the 'indexBuffer' buffer using the 'bitonic merge sort' method
+    
     public void Sort()
     {
-        sortCompute.SetInt("numEntries", indexBuffer.count);
-
-        int numStages = (int)Log(NextPowerOfTwo(indexBuffer.count), 2);
-
-        for (int stageIndex = 0; stageIndex < numStages; stageIndex++)
+        for (int stageIndex = 0; stageIndex < sortStageCount; stageIndex++)
         {
-            for (int stepIndex = 0; stepIndex < stageIndex; stepIndex++)
+            for (int stepIndex = 0; stepIndex < stageIndex + 1; stepIndex++)
             {
                 int groupWidth = 1 << (stageIndex - stepIndex);
                 int groupHeight = 2 * groupWidth - 1;
                 sortCompute.SetInt("groupWidth", groupWidth);
                 sortCompute.SetInt("groupHeight", groupHeight);
                 sortCompute.SetInt("stepIndex", stepIndex);
-                ComputeHelper.Dispatch(sortCompute, NextPowerOfTwo(indexBuffer.count) / 2, 0);
+                ComputeHelper.Dispatch(sortCompute, NextPowerOfTwo(indexBufferCount) / 2, 0);
             }
         }
     }
@@ -48,6 +49,6 @@ public class BufferSorter
     {
         Sort();
 
-        ComputeHelper.Dispatch(sortCompute, indexBuffer.count, offsetKernel);
+        ComputeHelper.Dispatch(sortCompute, indexBufferCount, offsetKernel);
     }
 }
