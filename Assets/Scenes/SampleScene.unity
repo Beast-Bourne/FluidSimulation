@@ -496,9 +496,9 @@ MonoBehaviour:
   boundSize: {x: 16, y: 9}
   gravity: -8
   damping: 0.8
-  smoothingRadius: 0.5
-  targetDensity: 100
-  pressureMultiplier: 120
+  smoothingRadius: 0.25
+  targetDensity: 1000
+  pressureMultiplier: 1200
   nearPressureMultiplier: 1
   viscocityMultiplier: 0.1
   mouseForceStrength: 40
@@ -820,7 +820,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c698f627ccc7521478aa775938f803b0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particleCount: 5000
+  particleCount: 100000
   spawnCentre: {x: 0, y: 0}
   spawnSize: {x: 12, y: 7}
 --- !u!4 &1810665984

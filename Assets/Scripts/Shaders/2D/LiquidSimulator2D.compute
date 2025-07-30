@@ -85,10 +85,10 @@ float2 CalculateDensity(float2 pos)
     float nearDensity = 0;
     float density = 0;
     float sqrRadius = smoothingRadius * smoothingRadius;
-    /*
+    
     for (int i = 0; i < 9; i++)
     {
-        uint hash = HashGridPos2D(originGridPos + GridOffsets[i]);
+        uint hash = HashGridPos2D(originGridPos + GridOffsets2D[i]);
         uint key = KeyFromHash(hash, numParticles);
         uint index = SpatialOffsets[key];
         
@@ -112,8 +112,8 @@ float2 CalculateDensity(float2 pos)
             nearDensity += Pow3Influence(dist, smoothingRadius);
         }
     }
-    */
     
+    /*
     for (uint i = 0; i < numParticles; i++)
     {
         float2 particleOffset = (usePredictions) ? PredictedPositions[i] - pos : Positions[i] - pos;
@@ -124,8 +124,8 @@ float2 CalculateDensity(float2 pos)
         density += Pow2Influence(dist, smoothingRadius);
         nearDensity += Pow3Influence(dist, smoothingRadius);
     }
-    
-        return float2(density, nearDensity);
+    */
+    return float2(density, nearDensity);
 }
 
 // checks if a partcile of the given index has collided with the outer bounds and updates its position and velocity accordingly
@@ -210,10 +210,10 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     float sqrSmoothRadius = smoothingRadius * smoothingRadius;
     int2 originGridPos = GetGridPos2D(pos, smoothingRadius);
     
-    /*
+    
     for (int i = 0; i < 9; i++)
     {
-        uint hash = HashGridPos2D(originGridPos + GridOffsets[i]);
+        uint hash = HashGridPos2D(originGridPos + GridOffsets2D[i]);
         uint key = KeyFromHash(hash, numParticles);
         uint index = SpatialOffsets[key];
         
@@ -249,8 +249,8 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             pressureForce += dirToAdj * Pow3Influence(dist, smoothingRadius) * sharedNearPressure / adjNearDensity;
         }
     }
-    */
     
+    /*
     for (uint i; i < numParticles; i++)
     {
         if (i == id.x) continue;
@@ -272,7 +272,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
         pressureForce += dirToParticle * sharedPressure * Pow2DerivativeInfluence(dist, smoothingRadius) / particleDensity;
         pressureForce += dirToParticle * Pow3Influence(dist, smoothingRadius) * sharedNearPressure / particleNearDensity;
     }
-    
+    */
     float2 accel = pressureForce / density;
     Velocities[id.x] += accel * deltaTime;
 }
@@ -288,7 +288,42 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
     float sqrSmoothingRadius = smoothingRadius * smoothingRadius;
     float2 viscosityForce = 0;
     float2 vel = Velocities[id.x];
+    int2 originGridPos = GetGridPos2D(pos, smoothingRadius);
     
+    for (int i = 0; i < 9; i++)
+    {
+        uint hash = HashGridPos2D(originGridPos + GridOffsets2D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = SpatialOffsets[key];
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = SpatialIndices[index];
+            index++;
+            
+            if (indexData[2] != key)
+                break;
+            if (indexData[1] != hash)
+                continue;
+            
+            uint adjIndex = indexData[0];
+            if (adjIndex == id.x)
+                continue;
+            
+            float2 adjPos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
+            float2 offsetToAdj = adjPos - pos;
+            float sqrtDistToAdj = dot(offsetToAdj, offsetToAdj);
+            
+            if (sqrtDistToAdj > sqrSmoothingRadius) continue;
+            
+            float dist = sqrt(sqrtDistToAdj);
+            float2 adjVel = Velocities[adjIndex];
+            
+            viscosityForce += (adjVel - vel) * PolynomialPow6Influence(dist, smoothingRadius);
+        }
+    }
+    
+    /*
     for (uint i = 0; i < numParticles; i++)
     {
         if (i == id.x) continue;
@@ -304,8 +339,8 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
         
         viscosityForce += (particleVel - vel) * PolynomialPow6Influence(dist, smoothingRadius);
     }
-    
-    vel += viscosityForce * viscocityMultiplier * deltaTime;
+    */
+        vel += viscosityForce * viscocityMultiplier * deltaTime;
     Velocities[id.x] = vel;
     
 }
