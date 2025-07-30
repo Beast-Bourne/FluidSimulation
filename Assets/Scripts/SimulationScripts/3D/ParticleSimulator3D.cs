@@ -11,7 +11,6 @@ public class ParticleSimulator3D : MonoBehaviour
     public ParticleSpawner3D spawner;
     public ParticleDisplay3D display;
     public ComputeShader compute;
-    public Transform floorDisplay;
 
     // buffers for the compute shader
     public ComputeBuffer positionBuffer { get; private set; }
@@ -20,6 +19,7 @@ public class ParticleSimulator3D : MonoBehaviour
     ComputeBuffer predictedPositionBuffer;
     ComputeBuffer spatialIndices;
     ComputeBuffer spatialOffsets;
+    ComputeBuffer celestialObjects;
     BufferSorter sorter;
 
     [Header("Simulation Settings")]
@@ -35,6 +35,7 @@ public class ParticleSimulator3D : MonoBehaviour
     public float mouseForceStrength;
     public float mouseRadius;
     public bool usePredictions;
+    public CelestialBody[] celestialBodies;
 
     // kernel IDs for the compute shader
     const int externalForceKernel = 0;
@@ -47,6 +48,7 @@ public class ParticleSimulator3D : MonoBehaviour
     // other
     public bool isPaused;
     bool isPausedNextFrame;
+    int oldBodyNum;
     ParticleSpawner3D.ParticleSpawnData spawnData;
     public int particleCount { get; private set; }
 
@@ -62,8 +64,11 @@ public class ParticleSimulator3D : MonoBehaviour
         densityBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
         spatialIndices = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
         spatialOffsets = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
+        celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(celestialBodies.Length);
 
         SetInitialBufferData(spawnData);
+
+        oldBodyNum = celestialBodies.Length;
 
         // tell the computer shader which kernels have access to which buffers
         ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", externalForceKernel, updatePositionKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel);
@@ -72,6 +77,7 @@ public class ParticleSimulator3D : MonoBehaviour
         ComputeHelper.SetBuffer(compute, spatialOffsets, "SpatialOffsets", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel);
         ComputeHelper.SetBuffer(compute, velocityBuffer, "Velocities", externalForceKernel, updatePositionKernel, pressureForceKernel, viscosityKernel);
         ComputeHelper.SetBuffer(compute, densityBuffer, "Densities", densityCalculationKernel, pressureForceKernel, viscosityKernel);
+        ComputeHelper.SetBuffer(compute, celestialObjects, "CelestialBodies", updatePositionKernel, externalForceKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -156,6 +162,16 @@ public class ParticleSimulator3D : MonoBehaviour
 
         compute.SetMatrix("localToWorld", transform.localToWorldMatrix);
         compute.SetMatrix("worldToLocal", transform.worldToLocalMatrix);
+
+        if (celestialBodies.Length != oldBodyNum)
+        {
+            ComputeHelper.Release(celestialObjects);
+            celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(celestialBodies.Length);
+            ComputeHelper.SetBuffer(compute, celestialObjects, "CelestialBodies", updatePositionKernel, externalForceKernel);
+            oldBodyNum = celestialBodies.Length;
+        }
+        celestialObjects.SetData(celestialBodies);
+        compute.SetInt("numOfCelestialBodies", celestialBodies.Length);
     }
 
     // Sets the initial buffer data for the simulation
@@ -192,7 +208,7 @@ public class ParticleSimulator3D : MonoBehaviour
     // Clears the memory of all the buffers from the compute shader when the program is closed
     private void OnDestroy()
     {
-        ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer, spatialIndices, spatialOffsets);
+        ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer, spatialIndices, spatialOffsets, celestialObjects);
     }
 
     // Draws the bounds of the fluid container in the scene
@@ -206,5 +222,19 @@ public class ParticleSimulator3D : MonoBehaviour
             Gizmos.DrawWireCube(Vector3.zero, Vector3.one);
             Gizmos.matrix = m;
         }
+
+        foreach (CelestialBody body in celestialBodies)
+        {
+            Gizmos.color = Color.red;
+            Gizmos.DrawWireSphere(body.position, body.radius);
+        }
     }
+}
+
+[System.Serializable]
+public struct CelestialBody
+{
+    public float3 position;
+    public float radius;
+    public float mass;
 }

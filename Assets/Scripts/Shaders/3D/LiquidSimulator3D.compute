@@ -12,6 +12,13 @@
 
 static const int threadCount = 64;
 
+struct CelestialBody
+{
+    float3 position;
+    float radius;
+    float mass;
+};
+
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 RWStructuredBuffer<float3> Positions;
@@ -20,6 +27,8 @@ RWStructuredBuffer<float2> Densities; // Densities[i].x is the density and Densi
 RWStructuredBuffer<float3> PredictedPositions;
 RWStructuredBuffer<uint3> SpatialIndices;
 RWStructuredBuffer<uint> SpatialOffsets;
+
+RWStructuredBuffer<CelestialBody> CelestialBodies;
 
 // constants used for calculations
 const uint numParticles;
@@ -34,6 +43,7 @@ const float pressureMultiplier;
 const float nearPressureMultiplier;
 const float viscocityMultiplier;
 const bool usePredictions;
+const uint numOfCelestialBodies;
 
 const float4x4 worldToLocal;
 const float4x4 localToWorld;
@@ -131,6 +141,50 @@ void HandleCollisions(int particleIndex)
     Velocities[particleIndex] = mul(localToWorld, float4(vel, 0)).xyz;
 }
 
+void HandleSphereCollision(int particleIndex)
+{
+    float3 pos = (usePredictions) ? PredictedPositions[particleIndex] : Positions[particleIndex];
+    float3 vel = Velocities[particleIndex];
+    
+    for (uint i = 0; i < numOfCelestialBodies; i++)
+    {
+        float sphereRadius = CelestialBodies[i].radius;
+        
+        float3 offset = pos - CelestialBodies[i].position;
+        float sqrDist = dot(offset, offset);
+    
+        if (sqrDist < sphereRadius * sphereRadius)
+        {
+            float dist = sqrt(sqrDist);
+            float3 upDir = normalize(offset);
+            float distToSurface = sphereRadius - dist;
+        
+            pos += upDir * distToSurface;
+            vel += upDir * max(0, dot(vel, -upDir)) * 1;
+
+            Positions[particleIndex] = pos;
+            Velocities[particleIndex] = vel;
+        }
+    }
+}
+
+float3 GravityAccel(float3 pos)
+{
+    float mass = 5000;
+    float gravConst = 0.003;
+    float3 gravityAccel;
+        
+    for (uint i = 0; i < numOfCelestialBodies; i++)
+    {
+        float3 offset = CelestialBodies[i].position - pos;
+        float3 gravityDir = normalize(offset);
+        float sqrDist = dot(offset, offset);
+        gravityAccel += gravityDir * (gravConst * mass * CelestialBodies[i].mass / sqrDist);
+    }
+    
+    return gravityAccel;
+}
+
 // kernel 0
 // applies external forces to all particles (gravity and mouse force)
 [numthreads(threadCount,1,1)]
@@ -138,7 +192,7 @@ void ApplyForces(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
-    Velocities[id.x] += float3(0, gravity, 0) * deltaTime;
+    Velocities[id.x] += GravityAccel(usePredictions ? PredictedPositions[id.x] : Positions[id.x]) * deltaTime;
     
     const float predictionFactor = 1 / 120.0;
     PredictedPositions[id.x] = Positions[id.x] + Velocities[id.x] * predictionFactor;
@@ -299,4 +353,5 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     
     Positions[id.x] += Velocities[id.x] * deltaTime;
     HandleCollisions(id.x);
+    HandleSphereCollision(id.x);
 }

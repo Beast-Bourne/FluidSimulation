@@ -235,7 +235,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c1f06fb2a8c1b6747aa3092981adfe6b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particlesPerSide: 20
+  particlesPerSide: 30
   spawnCentre: {x: 0, y: 0, z: 0}
   spawnSize: 1
   startingVelocity: {x: 0, y: 0, z: 0}
@@ -602,7 +602,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 3, y: 3, z: 3}
+  m_LocalScale: {x: 10, y: 10, z: 10}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 201853421}
