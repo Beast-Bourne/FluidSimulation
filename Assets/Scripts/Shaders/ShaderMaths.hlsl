@@ -4,6 +4,9 @@ const float Pow3Factor;
 const float Pow3DerivativeFactor;
 const float PolynomialPow6Factor;
 
+// This script contains the definitions of influence functions for the different particle properties
+// different influence functions are used because the behaviour of each property is different at distances close to 0
+
 float Pow2Influence(float dist, float smoothingRadius)
 {
     if (dist >= smoothingRadius) return 0.0f;

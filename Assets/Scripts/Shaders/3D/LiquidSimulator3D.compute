@@ -1,4 +1,4 @@
-// Each #kernel tells which function to compile; you can have many kernels
+// kernels
 #pragma kernel ApplyForces
 #pragma kernel UpdateGridHash
 #pragma kernel CalculateDensities
@@ -19,14 +19,14 @@ struct CelestialBody
     float mass;
 };
 
-// Create a RenderTexture with enableRandomWrite flag and set it
-// with cs.SetTexture
 RWStructuredBuffer<float3> Positions;
 RWStructuredBuffer<float3> Velocities;
 RWStructuredBuffer<float2> Densities; // Densities[i].x is the density and Densities[i].y is the near density
 RWStructuredBuffer<float3> PredictedPositions;
-RWStructuredBuffer<uint3> SpatialIndices;
-RWStructuredBuffer<uint> SpatialOffsets;
+
+// the SpatialIndices buffer is sorted by key and hash, so that all particles with the same key are grouped together
+RWStructuredBuffer<uint3> SpatialIndices; // SpatialIndices[i].x is the particleIndex, .y is the hash and .z is the key
+RWStructuredBuffer<uint> SpatialOffsets; // SpatialOffsets[i] is the index of the first particle in the SpatialIndices buffer with the key matching i
 
 RWStructuredBuffer<CelestialBody> CelestialBodies;
 
@@ -47,71 +47,6 @@ const uint numOfCelestialBodies;
 
 const float4x4 worldToLocal;
 const float4x4 localToWorld;
-
-float InfluenceKernel(float dist, float smoothingRadius)
-{
-    if (dist >= smoothingRadius) return 0;
-    float volume = 3.14159 * pow(smoothingRadius, 4) / 6;
-    return (smoothingRadius - dist) * (smoothingRadius - dist) / volume;
-}
-
-float DerivativeInfluenceKernel(float dist, float smoothingRadius)
-{
-    if (dist > smoothingRadius) return 0;
-    float scale = 12 / (pow(smoothingRadius, 4) * 3.14159);
-    return (dist - smoothingRadius) * scale;
-
-}
-
-float2 CalculateDensity(float3 pos)
-{
-    int3 originGridPos = GetGridPos3D(pos, smoothingRadius);
-    float nearDensity = 0;
-    float density = 0;
-    float sqrRadius = smoothingRadius * smoothingRadius;
-    
-    for (int i = 0; i < 27; i++)
-    {
-        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
-        uint key = KeyFromHash(hash, numParticles);
-        uint index = SpatialOffsets[key];
-        
-        while (index < numParticles)
-        {
-            uint3 indexData = SpatialIndices[index];
-            index++;
-            
-            if (indexData[2] != key) break; // if the key is wrong then exit the loop
-            if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
-            
-            uint adjacentIndex = indexData[0];
-            float3 adjacentPos = (usePredictions) ? PredictedPositions[adjacentIndex] : Positions[adjacentIndex];
-            float3 offsetToAdjacent = adjacentPos - pos;
-            float sqrDistToAdjacent = dot(offsetToAdjacent, offsetToAdjacent);
-            
-            if (sqrDistToAdjacent > sqrRadius) continue; // if the particle is outside the smoothing radius then skip it
-            
-            float dist = sqrt(sqrDistToAdjacent);
-            density += Pow2Influence(dist, smoothingRadius);
-            nearDensity += Pow3Influence(dist, smoothingRadius);
-        }
-    }
-    
-    /*
-    for (uint i = 0; i < numParticles; i++)
-    {
-        float3 particleOffset = (usePredictions) ? PredictedPositions[i] - pos : Positions[i] - pos;
-        float sqrDist = dot(particleOffset, particleOffset);
-        if (sqrDist > sqrRadius) continue;
-        
-        float dist = sqrt(sqrDist);
-        density += Pow2Influence(dist, smoothingRadius);
-        nearDensity += Pow3Influence(dist, smoothingRadius);
-    }
-    */
-    
-    return float2(density, nearDensity);
-}
 
 // checks if a partcile of the given index has collided with the outer bounds and updates its position and velocity accordingly
 void HandleCollisions(int particleIndex)
@@ -142,6 +77,7 @@ void HandleCollisions(int particleIndex)
     Velocities[particleIndex] = mul(localToWorld, float4(vel, 0)).xyz;
 }
 
+// checks for the collision of the particle with the celestial bodies (modelled as spheres)
 void HandleSphereCollision(int particleIndex)
 {
     float3 pos = (usePredictions) ? PredictedPositions[particleIndex] : Positions[particleIndex];
@@ -169,6 +105,7 @@ void HandleSphereCollision(int particleIndex)
     }
 }
 
+// calculates the influence of gravity from the celestial bodies on a particle at the given position
 float3 GravityAccel(float3 pos)
 {
     float mass = 5000;
@@ -187,7 +124,7 @@ float3 GravityAccel(float3 pos)
 }
 
 // kernel 0
-// applies external forces to all particles (gravity and mouse force)
+// applies gravity and updates the predicted positions of the particles
 [numthreads(threadCount,1,1)]
 void ApplyForces(uint3 id : SV_DispatchThreadID)
 {
@@ -202,6 +139,7 @@ void ApplyForces(uint3 id : SV_DispatchThreadID)
 // kernel 1
 // Calculates the spatial hash and key for each particle and stores it in the SpatialIndices buffer
 // this updates the spatial lookup as the particles move around
+// After this kernel is run the SpatialIndices buffer will be sorted by key and hash before kernel 2 is run
 [numthreads(threadCount,1,1)]
 void UpdateGridHash(uint3 id : SV_DispatchThreadID)
 {
@@ -216,7 +154,7 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 2
-// updates the density buffer
+// calculates the densioty and near density then updates the density buffer
 [numthreads(threadCount,1,1)]
 void CalculateDensities(uint3 id : SV_DispatchThreadID)
 {
@@ -224,11 +162,46 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
     
     float3 pos = (usePredictions)? PredictedPositions[id.x] : Positions[id.x];
     
-    Densities[id.x] = CalculateDensity(pos);
+    int3 originGridPos = GetGridPos3D(pos, smoothingRadius);
+    float nearDensity = 0;
+    float density = 0;
+    float sqrRadius = smoothingRadius * smoothingRadius;
+    
+    for (int i = 0; i < 27; i++)
+    {
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = SpatialOffsets[key];
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = SpatialIndices[index];
+            index++;
+            
+            if (indexData[2] != key)
+                break; // if the key is wrong then exit the loop
+            if (indexData[1] != hash)
+                continue; // if the hash is wrong then move to the next index
+            
+            uint adjacentIndex = indexData[0];
+            float3 adjacentPos = (usePredictions) ? PredictedPositions[adjacentIndex] : Positions[adjacentIndex];
+            float3 offsetToAdjacent = adjacentPos - pos;
+            float sqrDistToAdjacent = dot(offsetToAdjacent, offsetToAdjacent);
+            
+            if (sqrDistToAdjacent > sqrRadius)
+                continue; // if the particle is outside the smoothing radius then skip it
+            
+            float dist = sqrt(sqrDistToAdjacent);
+            density += Pow2Influence(dist, smoothingRadius);
+            nearDensity += Pow3Influence(dist, smoothingRadius);
+        }
+    }
+    
+    Densities[id.x] = float2(density, nearDensity);
 }
 
 // kernel 3
-// calculates the pressure force for each particle
+// calculates the pressure force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
 {
@@ -288,7 +261,8 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     Velocities[id.x] += accel * deltaTime;
 }
 
-//kernel 4
+// kernel 4
+// calculates the viscosity force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculateViscosities(uint3 id : SV_DispatchThreadID)
 {
@@ -330,24 +304,6 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
             viscosityForce += (particleVel - vel) * PolynomialPow6Influence(dist, smoothingRadius);
         }
     }
-    
-    /*
-    for (uint i = 0; i < numParticles; i++)
-    {
-        if (i == id.x) continue;
-        
-        float3 particlePos = (usePredictions) ? PredictedPositions[i] : Positions[i];
-        float3 particleOffset = particlePos - pos;
-        float sqrDist = dot(particleOffset, particleOffset);
-        
-        if (sqrDist > sqrSmoothingRadius) continue;
-        
-        float dist = sqrt(sqrDist);
-        float3 particleVel = Velocities[i];
-        
-        viscosityForce += (particleVel - vel) * PolynomialPow6Influence(dist, smoothingRadius);
-    }
-    */
     
     vel += viscosityForce * viscocityMultiplier * deltaTime;
     Velocities[id.x] = vel;

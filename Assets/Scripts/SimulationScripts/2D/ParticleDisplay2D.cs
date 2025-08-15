@@ -57,6 +57,8 @@ public class ParticleDisplay2D : MonoBehaviour
         }
     }
 
+    // Creates a texture from the gradient 'ColourMap' variable
+    // allows the particles to change colour based on their density or velocity
     void TextureFromGradient(ref Texture2D texture, int width, Gradient gradient, FilterMode filter = FilterMode.Bilinear)
     {
         if (texture == null)

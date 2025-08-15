@@ -12,7 +12,8 @@ public class ParticleSpawner3D : MonoBehaviour
     public Vector3 startingVelocity;
     public float randomOffsetStrength;
 
-    // returns the spawn data for the particles to start at
+    // This function generates the spawn data for particles in a 3D bounds
+    // it applies jitter so they particles arent in a uniform grid
     public ParticleSpawnData GetSpawnData()
     {
         ParticleSpawnData data = new ParticleSpawnData(particlesPerSide * particlesPerSide * particlesPerSide);

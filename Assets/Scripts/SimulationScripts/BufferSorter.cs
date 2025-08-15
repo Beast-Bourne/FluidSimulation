@@ -10,6 +10,7 @@ public class BufferSorter
     int indexBufferCount;
     int sortStageCount;
 
+    // BufferSorter constructor initializes the compute shader used for sorting
     public BufferSorter()
     {
         sortCompute = ComputeHelper.LoadComputeShader("GridSorter");
@@ -28,8 +29,8 @@ public class BufferSorter
         sortStageCount = (int)Log(NextPowerOfTwo(indexBufferCount), 2);
     }
 
-    
-    public void Sort()
+    // sorts the index buffer using a bitonic sort method
+    void Sort()
     {
         for (int stageIndex = 0; stageIndex < sortStageCount; stageIndex++)
         {
@@ -45,6 +46,7 @@ public class BufferSorter
         }
     }
 
+    // runs the sort function then calculates the offsets for each index in the index buffer
     public void SortAndCalcOffsets()
     {
         Sort();

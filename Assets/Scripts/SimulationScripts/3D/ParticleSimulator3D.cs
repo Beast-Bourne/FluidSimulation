@@ -100,11 +100,10 @@ public class ParticleSimulator3D : MonoBehaviour
             isPausedNextFrame = false;
         }
 
-        //floorDisplay.transform.localScale = new Vector3(1, 1/ transform.localScale.y * 0.1f, 1);
-
         HandleUserImput();
     }
 
+    // Runs the simulation step in fixed time intervals if the fixedTimeStep variable is set to true
     private void FixedUpdate()
     {
         if (fixedTimeStep)
@@ -185,6 +184,7 @@ public class ParticleSimulator3D : MonoBehaviour
         velocityBuffer.SetData(spawnData.velocities);
     }
 
+    // Handles user input to pause the simulation, reset it, or run a single frame
     void HandleUserImput()
     {
         if (Input.GetKeyDown(KeyCode.Space))
@@ -211,7 +211,7 @@ public class ParticleSimulator3D : MonoBehaviour
         ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer, spatialIndices, spatialOffsets, celestialObjects);
     }
 
-    // Draws the bounds of the fluid container in the scene
+    // Draws the bounds of the fluid container and the position of the celestial bodies in the scene
     void OnDrawGizmos()
     {
         if (Application.isPlaying)
