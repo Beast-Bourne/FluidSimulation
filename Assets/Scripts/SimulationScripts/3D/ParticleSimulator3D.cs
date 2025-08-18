@@ -11,6 +11,7 @@ public class ParticleSimulator3D : MonoBehaviour
     public ParticleSpawner3D spawner;
     public ParticleDisplay3D display;
     public ComputeShader compute;
+    public CelestialBodySim gravSim;
 
     // buffers for the compute shader
     public ComputeBuffer positionBuffer { get; private set; }
@@ -35,7 +36,6 @@ public class ParticleSimulator3D : MonoBehaviour
     public float mouseForceStrength;
     public float mouseRadius;
     public bool usePredictions;
-    public CelestialBody[] celestialBodies;
 
     // kernel IDs for the compute shader
     const int externalForceKernel = 0;
@@ -64,11 +64,11 @@ public class ParticleSimulator3D : MonoBehaviour
         densityBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
         spatialIndices = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
         spatialOffsets = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
-        celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(celestialBodies.Length);
+        celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(gravSim.celestialBodies.Length);
 
         SetInitialBufferData(spawnData);
 
-        oldBodyNum = celestialBodies.Length;
+        oldBodyNum = gravSim.celestialBodies.Length;
 
         // tell the computer shader which kernels have access to which buffers
         ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", externalForceKernel, updatePositionKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel);
@@ -120,6 +120,7 @@ public class ParticleSimulator3D : MonoBehaviour
 
         UpdateComputeSettings(frameTime);
         RunSimulationStep();
+        gravSim.GravitySimStep(frameTime);
         SimulationStepFinished?.Invoke(); // the '?' is a null-conditional operator (won't run the event if there is no subscribed action)
     }
 
@@ -162,15 +163,15 @@ public class ParticleSimulator3D : MonoBehaviour
         compute.SetMatrix("localToWorld", transform.localToWorldMatrix);
         compute.SetMatrix("worldToLocal", transform.worldToLocalMatrix);
 
-        if (celestialBodies.Length != oldBodyNum)
+        if (gravSim.celestialBodies.Length != oldBodyNum)
         {
             ComputeHelper.Release(celestialObjects);
-            celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(celestialBodies.Length);
+            celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(gravSim.celestialBodies.Length);
             ComputeHelper.SetBuffer(compute, celestialObjects, "CelestialBodies", updatePositionKernel, externalForceKernel);
-            oldBodyNum = celestialBodies.Length;
+            oldBodyNum = gravSim.celestialBodies.Length;
         }
-        celestialObjects.SetData(celestialBodies);
-        compute.SetInt("numOfCelestialBodies", celestialBodies.Length);
+        celestialObjects.SetData(gravSim.celestialBodies);
+        compute.SetInt("numOfCelestialBodies", gravSim.celestialBodies.Length);
     }
 
     // Sets the initial buffer data for the simulation
@@ -222,19 +223,5 @@ public class ParticleSimulator3D : MonoBehaviour
             Gizmos.DrawWireCube(Vector3.zero, Vector3.one);
             Gizmos.matrix = m;
         }
-
-        foreach (CelestialBody body in celestialBodies)
-        {
-            Gizmos.color = Color.red;
-            Gizmos.DrawWireSphere(body.position, body.radius);
-        }
     }
-}
-
-[System.Serializable]
-public struct CelestialBody
-{
-    public float3 position;
-    public float radius;
-    public float mass;
 }
