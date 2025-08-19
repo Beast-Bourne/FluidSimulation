@@ -120,7 +120,7 @@ public class ParticleSimulator3D : MonoBehaviour
 
         UpdateComputeSettings(frameTime);
         RunSimulationStep();
-        gravSim.GravitySimStep(frameTime);
+        gravSim.GravitySimStep(gravSim.celestialBodies, frameTime);
         SimulationStepFinished?.Invoke(); // the '?' is a null-conditional operator (won't run the event if there is no subscribed action)
     }
 
