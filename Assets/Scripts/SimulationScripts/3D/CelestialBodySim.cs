@@ -138,7 +138,8 @@ public class CelestialBodySim : MonoBehaviour
         for (int i = 0; i < orbitPredictions.Length; i++)
         {
             orbitTrajectory[i].RenderTrajectory();
-            orbitTrajectory[i].lineRenderer.sharedMaterial.color = celestialBodyInfo[i].bodyColour;
+            orbitTrajectory[i].lineRenderer.startColor = celestialBodyInfo[i].bodyColour;
+            orbitTrajectory[i].lineRenderer.endColor = celestialBodyInfo[i].bodyColour;
         }
     }
 
