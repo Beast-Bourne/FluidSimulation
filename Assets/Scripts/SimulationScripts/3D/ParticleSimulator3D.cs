@@ -48,7 +48,6 @@ public class ParticleSimulator3D : MonoBehaviour
     // other
     public bool isPaused;
     bool isPausedNextFrame;
-    int oldBodyNum;
     ParticleSpawner3D.ParticleSpawnData spawnData;
     public int particleCount { get; private set; }
 
@@ -64,11 +63,9 @@ public class ParticleSimulator3D : MonoBehaviour
         densityBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
         spatialIndices = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
         spatialOffsets = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
-        celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(gravSim.celestialBodies.Length);
+        celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(gravSim.celestialBodyInfo.Length);
 
         SetInitialBufferData(spawnData);
-
-        oldBodyNum = gravSim.celestialBodies.Length;
 
         // tell the computer shader which kernels have access to which buffers
         ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", externalForceKernel, updatePositionKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel);
@@ -163,13 +160,6 @@ public class ParticleSimulator3D : MonoBehaviour
         compute.SetMatrix("localToWorld", transform.localToWorldMatrix);
         compute.SetMatrix("worldToLocal", transform.worldToLocalMatrix);
 
-        if (gravSim.celestialBodies.Length != oldBodyNum)
-        {
-            ComputeHelper.Release(celestialObjects);
-            celestialObjects = ComputeHelper.CreateStructuredBuffer<CelestialBody>(gravSim.celestialBodies.Length);
-            ComputeHelper.SetBuffer(compute, celestialObjects, "CelestialBodies", updatePositionKernel, externalForceKernel);
-            oldBodyNum = gravSim.celestialBodies.Length;
-        }
         celestialObjects.SetData(gravSim.celestialBodies);
         compute.SetInt("numOfCelestialBodies", gravSim.celestialBodies.Length);
     }
@@ -183,6 +173,7 @@ public class ParticleSimulator3D : MonoBehaviour
         positionBuffer.SetData(allPoints);
         predictedPositionBuffer.SetData(allPoints);
         velocityBuffer.SetData(spawnData.velocities);
+        gravSim.celestialBodies = gravSim.InitialiseCelestialBodies();
     }
 
     // Handles user input to pause the simulation, reset it, or run a single frame
