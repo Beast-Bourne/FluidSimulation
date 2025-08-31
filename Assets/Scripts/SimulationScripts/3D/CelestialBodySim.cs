@@ -3,13 +3,14 @@ using System.Collections;
 using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 [ExecuteInEditMode]
 public class CelestialBodySim : MonoBehaviour
 {
     public CelestialBodyInfo[] celestialBodyInfo;
     public CelestialBody[] celestialBodies;
-    const float G = 2;
+    const float G = 1;
 
     public OrbitTrajectory[] orbitTrajectory;
     public bool showOrbits;
@@ -19,83 +20,167 @@ public class CelestialBodySim : MonoBehaviour
     public CelestialBody[] InitialiseCelestialBodies()
     {
         CelestialBody[] bodyArray = new CelestialBody[celestialBodyInfo.Length];
-        Vector3 totalSystemMomentum = Vector3.zero;
 
-        for (int i = 0; i < celestialBodyInfo.Length; i++)
-        {
-            int parentIndex = celestialBodyInfo[i].parentBodyIndex;
-            Vector3 initialVelocity = bodyArray[i].velocity + celestialBodyInfo[i].relativeVelocity + RetrieveParentVelocity(parentIndex, i);
-            if (parentIndex >=0) bodyArray[parentIndex].velocity -= celestialBodyInfo[i].relativeVelocity * celestialBodyInfo[i].mass / celestialBodyInfo[parentIndex].mass;
+        Vector3 sunPosition = Vector3.zero;
+        Vector3 planetPosition = new Vector3(celestialBodyInfo[0].orbitalRadius, 0, 0);
+        Vector3 moonPosition = planetPosition + new Vector3(celestialBodyInfo[1].orbitalRadius, 0, 0);
 
+        Vector3 sunVelocity = Vector3.zero;
+        Vector3 planetVelocity = Vector3.zero;
+        Vector3 moonVelocity = Vector3.zero;
 
-            bodyArray[i].position = celestialBodyInfo[i].initialPosition;
-            bodyArray[i].velocity = initialVelocity;
-            bodyArray[i].radius = celestialBodyInfo[i].radius;
-            bodyArray[i].mass = celestialBodyInfo[i].mass;
-        }
+        float sunMass = celestialBodyInfo[2].mass;
+        float planetMass = celestialBodyInfo[0].mass;
+        float moonMass = celestialBodyInfo[1].mass;
 
-        for (int i = 0; i < celestialBodyInfo.Length; i++)
-        {
-            if (celestialBodyInfo[i].parentBodyIndex < 0)
-            {
-                bodyArray[i].velocity -= totalSystemMomentum / bodyArray[i].mass;
-                break;
-            }
-            else
-            {
-                continue;
-            }
-        }
+        float planetSunSeparation = celestialBodyInfo[0].orbitalRadius;
+        float moonPlanetSeparation = celestialBodyInfo[1].orbitalRadius;
+        float moonSunSeparation = planetSunSeparation + moonPlanetSeparation;
+        float pmBarycentreMoonSeparation = (planetMass / (planetMass + moonMass)) * moonPlanetSeparation;
+        float pmBarycentrePlanetSeparation = (moonMass / (planetMass + moonMass)) * moonPlanetSeparation;
+        float sunPMBarycentreSeparation = planetSunSeparation + pmBarycentrePlanetSeparation;
+        float systemBarycentreSunSeparation = ((planetMass + moonMass) / (sunMass + planetMass + moonMass)) * (pmBarycentrePlanetSeparation + planetSunSeparation);
+        float pmBarycentreSystemSeparation = sunPMBarycentreSeparation - systemBarycentreSunSeparation;
+
+        float a = pmBarycentreSystemSeparation;
+        float rm = pmBarycentreMoonSeparation;
+        float rp = pmBarycentrePlanetSeparation;
+
+        float pmbVelAroundSunMag = Mathf.Sqrt(G * (sunMass + planetMass + moonMass) / (a));
+        Vector3 pmbVelAroundSun = Vector3.forward * pmbVelAroundSunMag * (sunMass / (sunMass + planetMass + moonMass));
+
+        float moonVelAroundPMBMag = Mathf.Sqrt((G * (planetMass) / (moonPlanetSeparation)) - (0.5f * G * sunMass * (moonPlanetSeparation * moonPlanetSeparation)/ (planetSunSeparation * planetSunSeparation * planetSunSeparation)));
+        Vector3 moonRelVel = Vector3.up * moonVelAroundPMBMag;
+        Vector3 planetRelVel = -Vector3.up * (moonMass / (planetMass + moonMass)) * moonVelAroundPMBMag;
+        moonRelVel *= (planetMass / (planetMass + moonMass));
+
+        moonVelocity = pmbVelAroundSun + moonRelVel;
+        planetVelocity = pmbVelAroundSun + planetRelVel;
+
+        Vector3 totalMomentum = moonMass * moonVelocity + planetMass * planetVelocity;
+        sunVelocity = -totalMomentum / sunMass;
+
+        bodyArray[0].mass = planetMass;
+        bodyArray[0].radius = celestialBodyInfo[0].radius;
+        bodyArray[0].position = planetPosition;
+        bodyArray[0].velocity = planetVelocity;
+
+        bodyArray[1].mass = moonMass;
+        bodyArray[1].radius = celestialBodyInfo[1].radius;
+        bodyArray[1].position = moonPosition;
+        bodyArray[1].velocity = moonVelocity;
+
+        bodyArray[2].mass = sunMass;
+        bodyArray[2].radius = celestialBodyInfo[2].radius;
+        bodyArray[2].position = sunPosition;
+        bodyArray[2].velocity = sunVelocity;
 
         return bodyArray;
+        /*
+        bodyArray[0].mass = celestialBodyInfo[0].mass;
+        bodyArray[0].radius = celestialBodyInfo[0].radius;
+        bodyArray[1].mass = celestialBodyInfo[1].mass;
+        bodyArray[1].radius = celestialBodyInfo[1].radius;
+        bodyArray[2].mass = celestialBodyInfo[2].mass;
+        bodyArray[2].radius = celestialBodyInfo[2].radius;
+
+        bodyArray[2].position = Vector3.zero;
+        bodyArray[0].position = bodyArray[2].position + Vector3.right * celestialBodyInfo[0].orbitalRadius;
+        bodyArray[1].position = bodyArray[0].position + (Vector3.right * celestialBodyInfo[1].orbitalRadius);
 
 
-        Vector3 RetrieveParentVelocity(int parentIndex, int currentIndex)
-        {
-            if (parentIndex < 0)
-            {
-                return Vector3.zero;
-            }
+        float moonMass = celestialBodyInfo[1].mass;
+        float planetMass = celestialBodyInfo[0].mass;
+        float sunMass = celestialBodyInfo[2].mass;
+        float planetMoonBaryCentrePos = (planetMass * celestialBodyInfo[0].orbitalRadius + moonMass * (celestialBodyInfo[1].orbitalRadius + celestialBodyInfo[0].orbitalRadius))/(planetMass+moonMass);
+        float sunPlanetBaryCentrePos = ((planetMass + moonMass) * planetMoonBaryCentrePos) / (sunMass + planetMass + moonMass);
 
-            if (celestialBodyInfo[parentIndex].parentBodyIndex < 0)
-            {
-                return celestialBodyInfo[parentIndex].relativeVelocity;
-            }
+        float a = planetMoonBaryCentrePos;// - sunPlanetBaryCentrePos;
+        float r = celestialBodyInfo[1].orbitalRadius + celestialBodyInfo[0].orbitalRadius - planetMoonBaryCentrePos;
 
-            totalSystemMomentum += celestialBodyInfo[parentIndex].relativeVelocity * celestialBodyInfo[currentIndex].mass;
-            return celestialBodyInfo[parentIndex].relativeVelocity + RetrieveParentVelocity(celestialBodyInfo[parentIndex].parentBodyIndex, currentIndex);
-        }
+        float sunFactor = G * (planetMass + sunMass) / (a * a * a);
+        Vector3 moonVel = Vector3.up * Mathf.Sqrt((G * (planetMass) / r) + 1.5f * sunFactor * r * r);
+        bodyArray[1].velocity = moonVel * planetMass / (planetMass + moonMass);
+        bodyArray[0].velocity = -moonVel * moonMass / (planetMass + moonMass);
+
+        Vector3 planetVel = Vector3.forward * Mathf.Sqrt(G * (sunMass + moonMass + planetMass) / a);
+        planetVel *= sunMass / (moonMass + planetMass + sunMass);
+
+        bodyArray[0].velocity += planetVel;
+        bodyArray[1].velocity += planetVel;
+
+        bodyArray[2].velocity = Vector3.zero;
+        bodyArray[2].velocity -= planetVel * (moonMass + planetMass) / (moonMass + planetMass + sunMass);
+        
+        return bodyArray;
+        */
     }
 
     // Calculates the acceleration due to gravity on each celestial body and applies it to update their velocities and positions
+    // Span is used to avoid heap allocations for performance (its essentially a stack-allocated array)
+    // stackalloc is used to allocate memory on the stack which is faster than heap allocation (stack has a few MB of memory so it can be used for small arrays)
     public void GravitySimStep(Span<CelestialBody> bodies, float deltaTime)
     {
         Span<Vector3> accels = stackalloc Vector3[bodies.Length];
 
-        for (int i = 0; i < bodies.Length-1; i++)
-        {
-            for (int j = i + 1; j < bodies.Length; j++)
-            {
-                float mass1 = bodies[i].mass;
-                float mass2 = bodies[j].mass;
-                
-                Vector3 bodyOffset = bodies[i].position - bodies[j].position;
-                float sqrDist = bodyOffset.sqrMagnitude;
-                float gravForce = G * mass1 * mass2 / sqrDist;
-
-                Vector3 dir = bodyOffset.normalized;
-                Vector3 accel1 = -dir * (gravForce / mass1);
-                Vector3 accel2 = dir * (gravForce / mass2);
-
-                accels[i] += accel1;
-                accels[j] += accel2;
-            }
-        }
+        ComputeCelestialAccels(bodies, accels);
 
         for (int i = 0; i < bodies.Length; i++)
         {
-            bodies[i].velocity += accels[i] * deltaTime;
+            bodies[i].velocity += accels[i] * deltaTime * 0.5f;
             bodies[i].position += bodies[i].velocity * deltaTime;
+        }
+
+        accels.Clear();
+        ComputeCelestialAccels(bodies, accels);
+
+        for (int i = 0; i < bodies.Length; i++)
+        {
+            bodies[i].velocity += accels[i] * deltaTime * 0.5f;
+        }
+
+
+        Vector3 totalMomentum = Vector3.zero;
+        float totalMass = 0.0f;
+        for (int i = 0; i < bodies.Length; i++)
+        {
+            totalMomentum += bodies[i].mass * bodies[i].velocity;
+            totalMass += bodies[i].mass;
+        }
+
+        Vector3 driftVelocity = totalMomentum / totalMass;
+        for (int i = 0; i < bodies.Length; i++)
+        {
+            bodies[i].velocity -= driftVelocity;
+        }
+
+        void ComputeCelestialAccels(Span<CelestialBody> bodies, Span<Vector3> accels)
+        {
+            float minDist = 0.1f; // to avoid division by zero in the gravitational force calculation
+
+            for (int i = 0; i < bodies.Length - 1; i++)
+            {
+                for (int j = i + 1; j < bodies.Length; j++)
+                {
+                    float mass1 = bodies[i].mass;
+                    float mass2 = bodies[j].mass;
+
+                    Vector3 bodyOffset = bodies[i].position - bodies[j].position;
+                    float sqrDist = bodyOffset.sqrMagnitude + minDist*minDist;
+
+                    float test = 1.0f / (Mathf.Sqrt(sqrDist) * sqrDist);
+                    Vector3 accel1 = -G * mass2 * bodyOffset * test;
+                    Vector3 accel2 = G * mass1 * bodyOffset * test;
+
+
+                    //Vector3 dir = bodyOffset.normalized;
+                    //Vector3 accel1 = -dir * (G * mass2 / sqrDist);
+                    //Vector3 accel2 = dir * (G * mass1 / sqrDist);
+
+                    accels[i] += accel1;
+                    accels[j] += accel2;
+                }
+            }
         }
     }
 
@@ -183,6 +268,7 @@ public struct CelestialBodyInfo
     public float mass;
     public int parentBodyIndex;
     public Color bodyColour;
+    public float orbitalRadius;
 }
 
 [System.Serializable]
