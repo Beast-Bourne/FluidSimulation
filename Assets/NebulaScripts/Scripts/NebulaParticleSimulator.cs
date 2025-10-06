@@ -32,8 +32,8 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float pressureMultiplier;
     public float nearPressureMultiplier;
     public float viscocityMultiplier;
-    public float mouseForceStrength;
-    public float mouseRadius;
+    public float gasConstant;
+    public float adiabaticIndex;
     public bool usePredictions;
 
     // kernel IDs for the compute shader
@@ -146,6 +146,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetBool("usePredictions", usePredictions);
         compute.SetFloat("nearPressureMultiplier", nearPressureMultiplier);
         compute.SetFloat("viscocityMultiplier", viscocityMultiplier);
+        compute.SetFloat("gasConstant", gasConstant);
+        compute.SetFloat("adiabaticIndex", adiabaticIndex);
 
         compute.SetFloat("Pow2Factor", 6 / (Mathf.PI * Mathf.Pow(smoothingRadius, 4)));
         compute.SetFloat("Pow2DerivativeFactor", 12 / (Mathf.PI * Mathf.Pow(smoothingRadius, 4)));

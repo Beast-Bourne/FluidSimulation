@@ -34,6 +34,8 @@ const float pressureMultiplier;
 const float nearPressureMultiplier;
 const float viscocityMultiplier;
 const bool usePredictions;
+const float gasConstant;
+const float adiabaticIndex;
 
 const float4x4 worldToLocal;
 const float4x4 localToWorld;
@@ -158,9 +160,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     
     float density = Densities[id.x][0];
-    float nearDensity = Densities[id.x][1];
-    float pressure = (density-targetDensity) * pressureMultiplier;
-    float nearPressure = nearPressureMultiplier * nearDensity;
+    float pressure = gasConstant * pow(abs(density), adiabaticIndex);
     float3 pressureForce = float3(0, 0, 0);
     
     float3 pos = (usePredictions)? PredictedPositions[id.x] : Positions[id.x];
@@ -186,7 +186,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             if (adjIndex == id.x) continue;
             
             float3 adjPos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
-            float3 offsetToAdj = adjPos - pos;
+            float3 offsetToAdj = pos - adjPos; //float3 offsetToAdj = adjPos - pos;
             float sqrtDistToAdj = dot(offsetToAdj, offsetToAdj);
             
             if (sqrtDistToAdj > sqrSmoothRadius) continue;
@@ -195,20 +195,17 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             
             float adjDensity = Densities[adjIndex][0];
-            float adjNearDensity = Densities[adjIndex][1];
-            float adjPressure = (adjDensity - targetDensity) * pressureMultiplier;
-            float adjNearPressure = nearPressureMultiplier * adjNearDensity;
+            float adjPressure = gasConstant * pow(abs(adjDensity), adiabaticIndex);
             
             float sharedPressure = (pressure + adjPressure) * 0.5;
-            float sharedNearPressure = (nearPressure + adjNearPressure) * 0.5;
             
-            pressureForce += dirToAdj * sharedPressure * Pow2DerivativeInfluence(dist, smoothingRadius) / adjDensity;
-            pressureForce += dirToAdj * Pow3Influence(dist, smoothingRadius) * sharedNearPressure / adjNearDensity;
+            //pressureForce += dirToAdj * sharedPressure * Pow2DerivativeInfluence(dist, smoothingRadius) / adjDensity;
+            pressureForce += dirToAdj * Pow2DerivativeInfluence(dist, smoothingRadius) * -(pressure / (density * density) + adjPressure / (adjDensity*adjDensity));
         }
     }
     
-    float3 accel = pressureForce / density;
-    Velocities[id.x] += accel * deltaTime;
+    //float3 accel = pressureForce / density;
+    Velocities[id.x] += pressureForce * deltaTime;
 }
 
 // kernel 4
