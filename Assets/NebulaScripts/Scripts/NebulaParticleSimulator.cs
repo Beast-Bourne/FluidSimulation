@@ -10,6 +10,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     [Header("References")]
     public NebulaParticleSpawner spawner;
     public NebulaParticleDisplay display;
+    public OctreeManager octreeManager;
     public ComputeShader compute;
 
     // buffers for the compute shader
@@ -77,6 +78,8 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         sorter = new();
         sorter.SetBuffers(spatialIndices, spatialOffsets);
+
+        octreeManager.BuildOctree(boundSize.x, smoothingRadius*2.0f);
 
         display.Init(this);
     }
