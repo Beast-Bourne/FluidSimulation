@@ -25,6 +25,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     [Header("Simulation Settings")]
     public bool fixedTimeStep;
     public float timeScale;
+    public Vector3 boundSize;
     public float gravity;
     public float damping;
     public float smoothingRadius = 2;
@@ -132,13 +133,9 @@ public class NebulaParticleSimulator : MonoBehaviour
     // Updates the compute settings for the simulation that are intended to be changeable during runtime
     void UpdateComputeSettings(float deltaTime)
     {
-        Vector3 boundSize = transform.localScale;
-        Vector3 boundCentre = transform.position;
-
         compute.SetFloat("deltaTime", deltaTime);
         compute.SetFloat("gravity", gravity);
         compute.SetVector("boundSize", boundSize);
-        compute.SetVector("boundCentre", boundCentre);
         compute.SetFloat("damping", damping);
         compute.SetFloat("smoothingRadius", smoothingRadius);
         compute.SetFloat("targetDensity", targetDensity);
@@ -154,9 +151,6 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("Pow3Factor", 10 / (Mathf.PI * Mathf.Pow(smoothingRadius, 5)));
         compute.SetFloat("Pow3DerivativeFactor", 30 / (Mathf.PI * Mathf.Pow(smoothingRadius, 5)));
         compute.SetFloat("PolynomialPow6Factor", 4 / (Mathf.PI * Mathf.Pow(smoothingRadius, 8)));
-
-        compute.SetMatrix("localToWorld", transform.localToWorldMatrix);
-        compute.SetMatrix("worldToLocal", transform.worldToLocalMatrix);
     }
 
     // Sets the initial buffer data for the simulation
@@ -197,16 +191,10 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer, spatialIndices, spatialOffsets, celestialObjects);
     }
 
-    // Draws the bounds of the fluid container and the position of the celestial bodies in the scene
+    // Draws the bounds of the fluid container
     void OnDrawGizmos()
     {
-        if (Application.isPlaying)
-        {
-            var m = Gizmos.matrix;
-            Gizmos.matrix = transform.localToWorldMatrix;
-            Gizmos.color = Color.green;
-            Gizmos.DrawWireCube(Vector3.zero, Vector3.one);
-            Gizmos.matrix = m;
-        }
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireCube(Vector3.zero, boundSize);
     }
 }

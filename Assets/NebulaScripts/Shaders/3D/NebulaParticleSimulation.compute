@@ -26,7 +26,6 @@ const uint numParticles;
 const float gravity;
 const float deltaTime;
 const float3 boundSize;
-const float3 boundCentre;
 const float damping;
 const float smoothingRadius;
 const float targetDensity;
@@ -37,16 +36,13 @@ const bool usePredictions;
 const float gasConstant;
 const float adiabaticIndex;
 
-const float4x4 worldToLocal;
-const float4x4 localToWorld;
-
 // checks if a partcile of the given index has collided with the outer bounds and updates its position and velocity accordingly
 void HandleCollisions(int particleIndex)
 {
-    float3 pos = mul(worldToLocal, float4(Positions[particleIndex], 1)).xyz;
-    float3 vel = mul(worldToLocal, float4(Velocities[particleIndex], 0)).xyz;
+    float3 pos = Positions[particleIndex]; // takes the world pos of the particle and converts it to local space of the bounds
+    float3 vel = Velocities[particleIndex];
     
-    const float3 halfSize = 0.5f;
+    const float3 halfSize = 0.5f * boundSize;
     float3 edgeDist = halfSize - abs(pos);
     
     if (edgeDist.x < 0)
@@ -65,8 +61,8 @@ void HandleCollisions(int particleIndex)
         vel.z = -vel.z * damping;
     }
     
-    Positions[particleIndex] = mul(localToWorld, float4(pos, 1)).xyz;
-    Velocities[particleIndex] = mul(localToWorld, float4(vel, 0)).xyz;
+    Positions[particleIndex] = pos;
+    Velocities[particleIndex] = vel;
 }
 
 // calculates the influence of gravity from the celestial bodies on a particle at the given position
