@@ -39,7 +39,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     public bool usePredictions;
 
     // kernel IDs for the compute shader
-    const int externalForceKernel = 0;
+    const int UpdatePredictionsKernel = 0;
     const int gridHashKernel = 1;
     const int densityCalculationKernel = 2;
     const int pressureForceKernel = 3;
@@ -68,11 +68,11 @@ public class NebulaParticleSimulator : MonoBehaviour
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", externalForceKernel, updatePositionKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel);
-        ComputeHelper.SetBuffer(compute, predictedPositionBuffer, "PredictedPositions", updatePositionKernel, gridHashKernel, densityCalculationKernel, pressureForceKernel, externalForceKernel, viscosityKernel);
+        ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", UpdatePredictionsKernel, gridHashKernel, updatePositionKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel);
+        ComputeHelper.SetBuffer(compute, predictedPositionBuffer, "PredictedPositions", updatePositionKernel, gridHashKernel, densityCalculationKernel, pressureForceKernel, UpdatePredictionsKernel, viscosityKernel);
         ComputeHelper.SetBuffer(compute, spatialIndices, "SpatialIndices", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel);
         ComputeHelper.SetBuffer(compute, spatialOffsets, "SpatialOffsets", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel);
-        ComputeHelper.SetBuffer(compute, velocityBuffer, "Velocities", externalForceKernel, updatePositionKernel, pressureForceKernel, viscosityKernel);
+        ComputeHelper.SetBuffer(compute, velocityBuffer, "Velocities", UpdatePredictionsKernel, updatePositionKernel, pressureForceKernel, viscosityKernel);
         ComputeHelper.SetBuffer(compute, densityBuffer, "Densities", densityCalculationKernel, pressureForceKernel, viscosityKernel);
         compute.SetInt("numParticles", particleCount);
 
@@ -124,7 +124,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     // Dispatches the compute shader to run the simulation step
     void RunSimulationStep()
     {
-        ComputeHelper.Dispatch(compute, particleCount, externalForceKernel);
+        ComputeHelper.Dispatch(compute, particleCount, UpdatePredictionsKernel);
         ComputeHelper.Dispatch(compute, particleCount, gridHashKernel);
         sorter.SortAndCalcOffsets();
         ComputeHelper.Dispatch(compute, particleCount, densityCalculationKernel);

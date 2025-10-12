@@ -1,5 +1,5 @@
 // kernels
-#pragma kernel ApplyForces
+#pragma kernel UpdatePredictions
 #pragma kernel UpdateGridHash
 #pragma kernel CalculateDensities
 #pragma kernel CalculatePressureForce
@@ -72,16 +72,35 @@ float3 GravityAccel(float3 pos)
 }
 
 // kernel 0
-// applies gravity and updates the predicted positions of the particles
+// updates the predicted positions of the particles
+// NOTE: look into having the predictions reflect particles off the bounds rather than just clamping them
 [numthreads(threadCount,1,1)]
-void ApplyForces(uint3 id : SV_DispatchThreadID)
+void UpdatePredictions(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
     Velocities[id.x] += GravityAccel(usePredictions ? PredictedPositions[id.x] : Positions[id.x]) * deltaTime;
     
     const float predictionFactor = 1 / 120.0;
-    PredictedPositions[id.x] = Positions[id.x] + Velocities[id.x] * predictionFactor;
+    float3 PredPos = Positions[id.x] + Velocities[id.x] * predictionFactor;
+    
+    const float3 halfSize = 0.5f * boundSize;
+    float3 edgeDist = halfSize - abs(PredPos);
+    
+    if (edgeDist.x < 0)
+    {
+        PredPos.x = halfSize.x * sign(PredPos.x);
+    }
+    if (edgeDist.y < 0)
+    {
+        PredPos.y = halfSize.y * sign(PredPos.y);
+    }
+    if (edgeDist.z < 0)
+    {
+        PredPos.z = halfSize.z * sign(PredPos.z);
+    }
+    
+    PredictedPositions[id.x] = PredPos;
 }
 
 // kernel 1
@@ -94,7 +113,7 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     SpatialOffsets[id.x] = numParticles; // reset the offsets
     uint index = id.x;
-    int3 gridPos = GetGridPos3D(PredictedPositions[index], smoothingRadius);
+    int3 gridPos = GetGridPos3D((usePredictions) ? PredictedPositions[index] : Positions[index], smoothingRadius);
     uint hash = HashGridPos3D(gridPos);
     uint key = KeyFromHash(hash, numParticles);
     SpatialIndices[id.x] = uint3(index, hash, key);

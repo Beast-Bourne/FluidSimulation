@@ -6580,7 +6580,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 24244b53b0429944d8990f2c0540d9a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  DisplayOctree: 1
+  DisplayOctree: 0
 --- !u!1 &960516717
 GameObject:
   m_ObjectHideFlags: 0

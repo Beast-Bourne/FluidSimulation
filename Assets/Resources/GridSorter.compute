@@ -46,7 +46,7 @@ void Sort(uint3 id : SV_DispatchThreadID)
 // For example, given an Entries buffer sorted by key like so: {2, 2, 2, 3, 6, 6, 9, 9, 9, 9}
 // The resulting Offsets calculated here should be:            {-, -, 0, 3, -, -, 4, -, -, 6}
 // (where '-' represents elements that won't be read/written)
-// NOTE: offsets buffer must filled with values equal to (or greater than) its length to ensure that this works correctly
+// NOTE: offsets buffer must be filled with values equal to (or greater than) its length to ensure that this works correctly
 
 [numthreads(128, 1, 1)]
 void CalculateOffsets(uint3 id : SV_DispatchThreadID)
