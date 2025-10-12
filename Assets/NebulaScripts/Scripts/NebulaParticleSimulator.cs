@@ -26,7 +26,6 @@ public class NebulaParticleSimulator : MonoBehaviour
     [Header("Simulation Settings")]
     public bool fixedTimeStep;
     public float timeScale;
-    public Vector3 boundSize;
     public float gravity;
     public float damping;
     public float smoothingRadius = 2;
@@ -79,7 +78,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         sorter = new();
         sorter.SetBuffers(spatialIndices, spatialOffsets);
 
-        octreeManager.BuildOctree(boundSize.x, smoothingRadius*2.0f);
+        octreeManager.BuildOctree(smoothingRadius*2.0f);
 
         display.Init(this);
     }
@@ -138,7 +137,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     {
         compute.SetFloat("deltaTime", deltaTime);
         compute.SetFloat("gravity", gravity);
-        compute.SetVector("boundSize", boundSize);
+        compute.SetVector("boundSize", new Vector3(octreeManager.BoundSize, octreeManager.BoundSize, octreeManager.BoundSize));
         compute.SetFloat("damping", damping);
         compute.SetFloat("smoothingRadius", smoothingRadius);
         compute.SetFloat("targetDensity", targetDensity);
@@ -192,12 +191,5 @@ public class NebulaParticleSimulator : MonoBehaviour
     private void OnDestroy()
     {
         ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer, spatialIndices, spatialOffsets, celestialObjects);
-    }
-
-    // Draws the bounds of the fluid container
-    void OnDrawGizmos()
-    {
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireCube(Vector3.zero, boundSize);
     }
 }

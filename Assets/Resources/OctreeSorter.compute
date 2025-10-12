@@ -1,0 +1,59 @@
+#pragma kernel SetSpatialData
+
+#include "../Scripts/Shaders/GridHelper.hlsl"
+
+struct OctreeNode
+{
+    float3 centre;
+    float size;
+    bool hasChildren;
+    uint firstChildIndex;
+    uint parentIndex;
+    uint spatialStartIndex;
+};
+
+RWStructuredBuffer<OctreeNode> Octree;
+RWStructuredBuffer<uint> SpatialKeys;
+RWStructuredBuffer<uint> SpatialHashes;
+
+const uint bottomLayerStartIndex;
+const uint numBottomLayerNodes;
+const uint smoothingRadius;
+const uint numParticles;
+
+static const int3 OctreeOffsets[8] =
+{
+    int3(-1, -1, -1),
+	int3(1, -1, -1),
+	int3(-1, 1, -1),
+	int3(1, 1, -1),
+	int3(-1, -1, 1),
+	int3(1, -1, 1),
+	int3(-1, 1, 1),
+	int3(1, 1, 1)
+};
+
+[numthreads(128,1,1)]
+void SetSpatialData (uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numBottomLayerNodes) return;
+    
+    uint index = bottomLayerStartIndex + id.x;
+    uint spatialStartIndex = id.x * 8;
+    
+    Octree[index].spatialStartIndex = spatialStartIndex;
+    
+    for (int i = 0; i < 8; i++)
+    {
+        float quartSize = Octree[index].size * 0.25;
+        float3 pos = Octree[index].centre + (quartSize * OctreeOffsets[i]);
+        
+        int3 GridPos = GetGridPos3D(pos, smoothingRadius);
+        uint hash = HashGridPos3D(GridPos);
+        uint key = KeyFromHash(hash, numParticles);
+        
+        SpatialHashes[spatialStartIndex + i] = hash;
+        SpatialKeys[spatialStartIndex + i] = key;
+    }
+
+}
