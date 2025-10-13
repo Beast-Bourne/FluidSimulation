@@ -81,7 +81,7 @@ public class OctreeManager : MonoBehaviour
         }
     }
 
-    public void SetBuffers(ComputeBuffer OctreeBuffer, ComputeBuffer HashBuffer, float octreeMinSize)
+    public void SetBuffers(ComputeBuffer OctreeBuffer, ComputeBuffer HashBuffer, float octreeMinSize, ComputeBuffer indexBuffer, ComputeBuffer offsetBuffer, int numParticles, ComputeBuffer posBuffer, float particleMass)
     {
         BuildOctree(octreeMinSize);
 
@@ -89,14 +89,31 @@ public class OctreeManager : MonoBehaviour
         System.Array.Copy(Octree, allNodes, Octree.Length);
         OctreeBuffer.SetData(allNodes);
 
-        ComputeHelper.SetBuffer(SpatialCompute, OctreeBuffer, "Octree", 0);
-        ComputeHelper.SetBuffer(SpatialCompute, HashBuffer, "SpatialHashes", 0);
+        ComputeHelper.SetBuffer(SpatialCompute, OctreeBuffer, "Octree", 0, 1);
+        ComputeHelper.SetBuffer(SpatialCompute, HashBuffer, "SpatialHashes", 0, 1);
+        ComputeHelper.SetBuffer(SpatialCompute, indexBuffer, "SpatialIndices", 1);
+        ComputeHelper.SetBuffer(SpatialCompute, offsetBuffer, "SpatialOffsets", 1);
+        ComputeHelper.SetBuffer(SpatialCompute, posBuffer, "Positions", 1);
 
         SpatialCompute.SetInt("bottomLayerStartIndex", ((int)IntPow(8, NumOfLayers-1) - 1) / 7);
         SpatialCompute.SetInt("numBottomLayerNodes", NumBottomLayerNodes);
         SpatialCompute.SetFloat("smoothingRadius", octreeMinSize/2.0f);
+        SpatialCompute.SetInt("numParticles", numParticles);
+        SpatialCompute.SetFloat("particleMass", particleMass);
 
         ComputeHelper.Dispatch(SpatialCompute, NumBottomLayerNodes, 0);
+    }
+
+    public void UpdateOctree()
+    {
+        for (int i = 0; i < NumOfLayers; i++)
+        {
+            int layer = (int)NumOfLayers - i;
+            SpatialCompute.SetInt("currentLayer", layer);
+            SpatialCompute.SetInt("currentLayerStartIndex", ((int)IntPow(8, (uint)(layer - 1)) - 1) / 7);
+            SpatialCompute.SetInt("numNodesInCurrentLayer", (int)IntPow(8, (uint)(layer-1)));
+            ComputeHelper.Dispatch(SpatialCompute, NumOfNodes, 1);
+        }
     }
 
     private OctreeNode CreateRootNode(float minSize)
@@ -132,13 +149,11 @@ public class OctreeManager : MonoBehaviour
         {
             Gizmos.color = Color.white;
 
-            uint currIndex = 0;
-            for (uint i = 0; i < NumOfLayers; i++)
+            uint currIndex = 1;
+            for (uint i = 0; i < 8; i++)
             {
-                DrawLeafGizmo(currIndex);
-                currIndex = Octree[currIndex].FirstChildIndex+i;
+                DrawLeafGizmo(Octree[currIndex].FirstChildIndex + i);
             }
-
         }
 
         void DrawLeafGizmo(uint i)

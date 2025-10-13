@@ -1,4 +1,5 @@
 #pragma kernel SetSpatialData
+#pragma kernel UpdateMasses
 
 #include "../Scripts/Shaders/GridHelper.hlsl"
 
@@ -17,9 +18,19 @@ struct OctreeNode
 RWStructuredBuffer<OctreeNode> Octree;
 RWStructuredBuffer<uint> SpatialHashes;
 
+RWStructuredBuffer<float3> Positions;
+RWStructuredBuffer<uint3> SpatialIndices;
+RWStructuredBuffer<uint> SpatialOffsets;
+
 const uint bottomLayerStartIndex;
 const uint numBottomLayerNodes;
 const float smoothingRadius;
+const uint numParticles;
+const float particleMass;
+
+const uint currentLayer;
+const uint numNodesInCurrentLayer;
+const uint currentLayerStartIndex;
 
 static const int3 OctreeOffsets[8] =
 {
@@ -33,6 +44,8 @@ static const int3 OctreeOffsets[8] =
 	int3(1, 1, 1)
 };
 
+// kernel 1
+// Sets spatial data for the bottom layer of the octree
 [numthreads(128,1,1)]
 void SetSpatialData (uint3 id : SV_DispatchThreadID)
 {
@@ -54,4 +67,54 @@ void SetSpatialData (uint3 id : SV_DispatchThreadID)
         SpatialHashes[spatialStartIndex + i] = hash;
     }
 
+}
+
+// kernel 2
+// updates the masses of the octree layer
+[numthreads(128, 1, 1)]
+void UpdateMasses(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numNodesInCurrentLayer) return;
+    
+    uint index = currentLayerStartIndex + id.x;
+    float3 centreOfMass = float3(0, 0, 0);
+    float totalMass = 0.0000000001f; // prevents a divide by zero error (should be fine as along as its not similar to the particle mass)
+    
+    
+    if (!Octree[index].hasChildren)
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            uint hash = SpatialHashes[Octree[index].spatialStartIndex + i];
+            uint key = KeyFromHash(hash, numParticles);
+            uint partIndex = SpatialOffsets[key];
+            
+            while (partIndex < numParticles)
+            {
+                uint3 indexData = SpatialIndices[partIndex];
+                partIndex++;
+            
+                if (indexData[2] != key) break; // if the key is wrong then exit the loop
+                if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
+                
+                centreOfMass = ((particleMass * Positions[indexData[0]]) + (totalMass * centreOfMass)) / (totalMass + particleMass);
+                totalMass += particleMass;
+            }
+        }
+    }
+    else
+    {
+        uint childIndex = Octree[index].firstChildIndex;
+        for (int i = 0; i < 8; i++)
+        {
+            centreOfMass = ((Octree[childIndex].mass * Octree[childIndex].centreOfMass) + (totalMass * centreOfMass)) / (totalMass + Octree[childIndex].mass);
+            totalMass += Octree[childIndex].mass;
+            childIndex++;
+
+        }
+
+    }
+    
+    Octree[index].centreOfMass = centreOfMass;
+    Octree[index].mass = totalMass;
 }

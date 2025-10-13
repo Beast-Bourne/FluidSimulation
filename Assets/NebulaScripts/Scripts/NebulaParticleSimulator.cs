@@ -42,12 +42,11 @@ public class NebulaParticleSimulator : MonoBehaviour
     // kernel IDs for the compute shader
     const int UpdatePredictionsKernel = 0;
     const int gridHashKernel = 1;
-    const int octreeKernel = 2;
-    const int gravityKernel = 3;
-    const int densityCalculationKernel = 4;
-    const int pressureForceKernel = 5;
-    const int viscosityKernel = 6;
-    const int updatePositionKernel = 7;
+    const int gravityKernel = 2;
+    const int densityCalculationKernel = 3;
+    const int pressureForceKernel = 4;
+    const int viscosityKernel = 5;
+    const int updatePositionKernel = 6;
 
     // other
     public bool isPaused;
@@ -75,18 +74,18 @@ public class NebulaParticleSimulator : MonoBehaviour
         // tell the computer shader which kernels have access to which buffers
         ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", UpdatePredictionsKernel, gridHashKernel, updatePositionKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel);
         ComputeHelper.SetBuffer(compute, predictedPositionBuffer, "PredictedPositions", updatePositionKernel, gridHashKernel, densityCalculationKernel, pressureForceKernel, UpdatePredictionsKernel, viscosityKernel, gravityKernel);
-        ComputeHelper.SetBuffer(compute, spatialIndices, "SpatialIndices", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, octreeKernel);
-        ComputeHelper.SetBuffer(compute, spatialOffsets, "SpatialOffsets", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, octreeKernel);
+        ComputeHelper.SetBuffer(compute, spatialIndices, "SpatialIndices", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel);
+        ComputeHelper.SetBuffer(compute, spatialOffsets, "SpatialOffsets", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel);
         ComputeHelper.SetBuffer(compute, velocityBuffer, "Velocities", UpdatePredictionsKernel, updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel);
         ComputeHelper.SetBuffer(compute, densityBuffer, "Densities", densityCalculationKernel, pressureForceKernel, viscosityKernel);
-        ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel, octreeKernel);
-        ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel, octreeKernel);
+        ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
+        ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
         sorter.SetBuffers(spatialIndices, spatialOffsets);
 
-        octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, smoothingRadius*2.0f);
+        octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, smoothingRadius*2.0f, spatialIndices, spatialOffsets, particleCount, positionBuffer, particleMass);
 
         display.Init(this);
     }
@@ -134,12 +133,13 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.Dispatch(compute, particleCount, UpdatePredictionsKernel); // first update the predicted postions
         ComputeHelper.Dispatch(compute, particleCount, gridHashKernel); // then calculate the spatial hashes and indices
         sorter.SortAndCalcOffsets(); // sort the indices and calculate the offsets
-        ComputeHelper.Dispatch(compute, particleCount, octreeKernel); // update the octree mass values
+        octreeManager.UpdateOctree(); // update the octree mass values
         ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity between particles
         ComputeHelper.Dispatch(compute, particleCount, densityCalculationKernel); // calculate the density at each particle
         ComputeHelper.Dispatch(compute, particleCount, pressureForceKernel); // calculate and apply pressure forces
         ComputeHelper.Dispatch(compute, particleCount, viscosityKernel); // calculate and apply viscocity forces
         ComputeHelper.Dispatch(compute, particleCount, updatePositionKernel); // finally update the particle positions and velocities
+
     }
 
     // Updates the compute settings for the simulation that are intended to be changeable during runtime

@@ -1,7 +1,6 @@
 // kernels
 #pragma kernel UpdatePredictions
 #pragma kernel UpdateGridHash
-#pragma kernel UpdateOctree
 #pragma kernel CalculateGravity
 #pragma kernel CalculateDensities
 #pragma kernel CalculatePressureForce
@@ -132,16 +131,6 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 2
-// Updates the octree masses and centres of mass
-[numthreads(threadCount, 1, 1)]
-void UpdateOctree(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= numParticles) return;
-    
-    
-}
-
-// kernel 3
 // calculates the gravity force between the particles
 [numthreads(threadCount,1,1)]
 void CalculateGravity(uint3 id : SV_DispatchThreadID)
@@ -151,7 +140,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     
 }
 
-// kernel 4
+// kernel 3
 // calculates the densioty and near density then updates the density buffer
 [numthreads(threadCount,1,1)]
 void CalculateDensities(uint3 id : SV_DispatchThreadID)
@@ -195,7 +184,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
     Densities[id.x] = float2(density, nearDensity);
 }
 
-// kernel 5
+// kernel 4
 // calculates the pressure force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
@@ -251,7 +240,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     Velocities[id.x] += pressureForce * deltaTime;
 }
 
-// kernel 6
+// kernel 5
 // calculates the viscosity force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculateViscosities(uint3 id : SV_DispatchThreadID)
@@ -300,7 +289,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
     
 }
 
-// kernel 7
+// kernel 6
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
