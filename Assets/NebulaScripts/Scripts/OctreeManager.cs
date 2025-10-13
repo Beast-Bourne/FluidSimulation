@@ -9,13 +9,17 @@ public class OctreeManager : MonoBehaviour
     [SerializeField]
     private ComputeShader SpatialCompute;
 
-    public OctreeNode[] Octree;
+    private OctreeNode[] Octree;
     [HideInInspector]
     public uint[] SpatialKeys;
     [HideInInspector]
     public uint[] SpatialHashes;
     [HideInInspector]
     public float BoundSize;
+    [HideInInspector]
+    public int NumOfNodes { get { return ((int)IntPow(8, NumOfLayers) - 1) / 7; } }
+    [HideInInspector]
+    public int NumBottomLayerNodes { get { return (int)IntPow(8, NumOfLayers - 1); } }
 
     private Vector3[] childOffsets = 
     {
@@ -29,10 +33,9 @@ public class OctreeManager : MonoBehaviour
         new Vector3(1.0f, 1.0f, 1.0f)
     };
 
-    public void BuildOctree(float minSize)
+    private void BuildOctree(float minSize)
     {
-        uint numOfNodes = (IntPow(8, NumOfLayers) - 1) / 7;
-        Octree = new OctreeNode[numOfNodes];
+        Octree = new OctreeNode[NumOfNodes];
 
         uint currentLayer = 1;
         uint CurrentLayerStartIndex = 0;
@@ -45,12 +48,9 @@ public class OctreeManager : MonoBehaviour
             GenerateNextLayer();
         }
 
-        SetSpatialData();
-
-
         void GenerateNextLayer()
         {
-            for (uint i = 0; i < numOfNodes; i++)
+            for (uint i = 0; i < NumOfNodes; i++)
             {
                 if (CurrentLayerStartIndex + i >= NextLayerStartIndex)
                 {
@@ -68,7 +68,7 @@ public class OctreeManager : MonoBehaviour
         void GenerateChildren(uint ParentIndex, float childSize)
         {
             Octree[ParentIndex].FirstChildIndex = EndOfDefinedNodesIndex + 1;
-            bool hasChildren = (currentLayer + 1 < NumOfLayers) ? true : false;
+            uint hasChildren = (currentLayer + 1 < NumOfLayers) ? (uint)1 : 0;
 
             for (uint i = 0; i < 8; i++)
             {
@@ -81,16 +81,22 @@ public class OctreeManager : MonoBehaviour
         }
     }
 
-    private void SetSpatialData()
+    public void SetBuffers(ComputeBuffer OctreeBuffer, ComputeBuffer HashBuffer, float octreeMinSize)
     {
+        BuildOctree(octreeMinSize);
 
-    }
+        OctreeNode[] allNodes = new OctreeNode[Octree.Length];
+        System.Array.Copy(Octree, allNodes, Octree.Length);
+        OctreeBuffer.SetData(allNodes);
 
-    public void SetBuffers(ComputeBuffer OctreeBuffer, ComputeBuffer KeyBuffer, ComputeBuffer HashBuffer)
-    {
         ComputeHelper.SetBuffer(SpatialCompute, OctreeBuffer, "Octree", 0);
-        ComputeHelper.SetBuffer(SpatialCompute, KeyBuffer, "SpatialKeys", 0);
         ComputeHelper.SetBuffer(SpatialCompute, HashBuffer, "SpatialHashes", 0);
+
+        SpatialCompute.SetInt("bottomLayerStartIndex", ((int)IntPow(8, NumOfLayers-1) - 1) / 7);
+        SpatialCompute.SetInt("numBottomLayerNodes", NumBottomLayerNodes);
+        SpatialCompute.SetFloat("smoothingRadius", octreeMinSize/2.0f);
+
+        ComputeHelper.Dispatch(SpatialCompute, NumBottomLayerNodes, 0);
     }
 
     private OctreeNode CreateRootNode(float minSize)
@@ -98,7 +104,7 @@ public class OctreeManager : MonoBehaviour
         OctreeNode rootNode = new OctreeNode();
         rootNode.centre = Vector3.zero;
         rootNode.size = minSize * IntPow(2, NumOfLayers - 1);
-        rootNode.hasChildren = true;
+        rootNode.hasChildren = 1;
         rootNode.FirstChildIndex = 1;
         rootNode.ParentIndex = 0;
         rootNode.SpatialStartIndex = 0;
@@ -126,20 +132,29 @@ public class OctreeManager : MonoBehaviour
         {
             Gizmos.color = Color.white;
 
-            for (int i = 0; i < Octree.Length; i++)
+            uint currIndex = 0;
+            for (uint i = 0; i < NumOfLayers; i++)
             {
-                OctreeNode node = Octree[i];
-                Gizmos.DrawWireCube(node.centre, new Vector3(node.size, node.size, node.size));
+                DrawLeafGizmo(currIndex);
+                currIndex = Octree[currIndex].FirstChildIndex+i;
             }
+
+        }
+
+        void DrawLeafGizmo(uint i)
+        {
+            Gizmos.DrawWireCube(Octree[i].centre, new Vector3(Octree[i].size, Octree[i].size, Octree[i].size));
         }
     }
 }
 
 public struct OctreeNode
 {
+    public float mass;
+    public Vector3 CentreOfMass;
     public Vector3 centre;
     public float size;
-    public bool hasChildren;
+    public uint hasChildren;
     public uint FirstChildIndex;
     public uint ParentIndex;
     public uint SpatialStartIndex;

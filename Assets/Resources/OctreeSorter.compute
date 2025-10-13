@@ -4,6 +4,8 @@
 
 struct OctreeNode
 {
+    float mass;
+    float3 centreOfMass;
     float3 centre;
     float size;
     bool hasChildren;
@@ -13,13 +15,11 @@ struct OctreeNode
 };
 
 RWStructuredBuffer<OctreeNode> Octree;
-RWStructuredBuffer<uint> SpatialKeys;
 RWStructuredBuffer<uint> SpatialHashes;
 
 const uint bottomLayerStartIndex;
 const uint numBottomLayerNodes;
-const uint smoothingRadius;
-const uint numParticles;
+const float smoothingRadius;
 
 static const int3 OctreeOffsets[8] =
 {
@@ -50,10 +50,8 @@ void SetSpatialData (uint3 id : SV_DispatchThreadID)
         
         int3 GridPos = GetGridPos3D(pos, smoothingRadius);
         uint hash = HashGridPos3D(GridPos);
-        uint key = KeyFromHash(hash, numParticles);
         
         SpatialHashes[spatialStartIndex + i] = hash;
-        SpatialKeys[spatialStartIndex + i] = key;
     }
 
 }

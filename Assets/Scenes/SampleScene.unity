@@ -6580,7 +6580,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 24244b53b0429944d8990f2c0540d9a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  DisplayOctree: 0
+  NumOfLayers: 6
+  DisplayOctree: 1
+  SpatialCompute: {fileID: 7200000, guid: c7bb5f47370efe945acee1070e3d0c42, type: 3}
+  SpatialKeys: 
+  SpatialHashes: 
+  BoundSize: 0
 --- !u!1 &960516717
 GameObject:
   m_ObjectHideFlags: 0
@@ -14039,8 +14044,8 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   fixedTimeStep: 1
   timeScale: 1
-  boundSize: {x: 50, y: 50, z: 50}
-  gravity: 0
+  gravity: 1
+  particleMass: 1
   damping: 0.8
   smoothingRadius: 0.5
   targetDensity: 100
