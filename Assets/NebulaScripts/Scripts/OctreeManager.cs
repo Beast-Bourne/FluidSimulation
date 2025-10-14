@@ -149,16 +149,24 @@ public class OctreeManager : MonoBehaviour
         {
             Gizmos.color = Color.white;
 
-            uint currIndex = 1;
-            for (uint i = 0; i < 8; i++)
+            uint currIndex = 0;
+            for (uint i = 0; i < NumOfLayers; i++)
             {
-                DrawLeafGizmo(Octree[currIndex].FirstChildIndex + i);
+                DrawLeafGizmo(Octree[currIndex].FirstChildIndex);
+                currIndex = Octree[currIndex].FirstChildIndex;
             }
         }
 
         void DrawLeafGizmo(uint i)
         {
             Gizmos.DrawWireCube(Octree[i].centre, new Vector3(Octree[i].size, Octree[i].size, Octree[i].size));
+        }
+
+        if (Octree == null)
+        {
+            Gizmos.color = Color.white;
+            float boundSize = 1.0f * IntPow(2, NumOfLayers - 1);
+            Gizmos.DrawWireCube(Vector3.zero, new Vector3(boundSize, boundSize, boundSize));
         }
     }
 }

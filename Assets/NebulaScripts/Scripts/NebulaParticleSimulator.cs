@@ -29,6 +29,8 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float timeScale;
     public float gravity;
     public float particleMass;
+    public float barnesHutAccuracyThreshold;
+    public float softeningLength;
     public float damping;
     public float smoothingRadius = 2;
     public float targetDensity;
@@ -148,6 +150,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("deltaTime", deltaTime);
         compute.SetFloat("gravity", gravity);
         compute.SetFloat("particleMass", particleMass);
+        compute.SetFloat("BarnesHutTheta", barnesHutAccuracyThreshold);
+        compute.SetFloat("softeningLength", softeningLength);
         compute.SetVector("boundSize", new Vector3(octreeManager.BoundSize, octreeManager.BoundSize, octreeManager.BoundSize));
         compute.SetFloat("damping", damping);
         compute.SetFloat("smoothingRadius", smoothingRadius);

@@ -42,6 +42,8 @@ RWStructuredBuffer<uint> SpatialHashes;
 const uint numParticles;
 const float gravity;
 const float particleMass;
+const float BarnesHutTheta;
+const float softeningLength;
 const float deltaTime;
 const float3 boundSize;
 const float damping;
@@ -81,6 +83,93 @@ void HandleCollisions(int particleIndex)
     
     Positions[particleIndex] = pos;
     Velocities[particleIndex] = vel;
+}
+
+float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos)
+{
+    float3 gravAccel = float3(0, 0, 0);
+    float sqrSoftening = softeningLength * softeningLength;
+    
+    uint spatialIndex = Octree[nodeIndex].spatialStartIndex;
+    
+    for (int i = 0; i < 8; i++)
+    {
+        uint hash = SpatialHashes[spatialIndex + i];
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = SpatialOffsets[key];
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = SpatialIndices[index];
+            index++;
+            
+            if (indexData[2] != key) break; // if the key is wrong then exit the loop
+            if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
+            
+            uint adjacentIndex = indexData[0];
+            float3 adjacentPos = (usePredictions) ? PredictedPositions[adjacentIndex] : Positions[adjacentIndex];
+            float3 offsetToAdjacent = adjacentPos - particlePos;
+            float distToAdjacent = length(offsetToAdjacent);
+            
+            float3 dir = offsetToAdjacent / distToAdjacent;
+            float gravMag = gravity * particleMass * pow(distToAdjacent * distToAdjacent + sqrSoftening, -1.5);
+            gravAccel += dir * gravMag;
+        }
+    }
+    
+    return gravAccel;
+}
+
+float3 GetGravityAccelFromOctreeChildren(uint parentIndex, float3 particlePos)
+{
+    float3 gravAccel = float3(0,0,0);
+    float sqrSoftening = softeningLength * softeningLength;
+    
+    uint stack[64]; // stack for storing indices to visit. This gets around the issue of recursion in compute shaders
+    uint stackPtr = 0;
+    
+    stack[0] = parentIndex;
+    stackPtr++;
+    
+    while (stackPtr > 0)
+    {
+        stackPtr -= 1;
+        uint index = stack[stackPtr];
+        OctreeNode node = Octree[index];
+        
+        if (node.mass <= 0) continue; // skips calculations if node has no mass
+        
+        float3 offset = node.centreOfMass - particlePos;
+        float d = length(offset);
+        
+        if (d <= 0) continue; // skips calculations if the particle is at the same position as the node's centre of mass
+        
+        float s = node.size;
+        
+        if (s / d < BarnesHutTheta)
+        {
+            float3 dir = offset / d;
+            float accelMag = gravity * node.mass * pow(d * d + sqrSoftening, -1.5);
+            gravAccel += dir * accelMag;
+        }
+        else
+        {
+            if (node.hasChildren) // if the node has children then add them to the stack
+            {
+                for (int i = 0; i < 8; i++)
+                {
+                    stack[stackPtr] = node.firstChildIndex + i;
+                    stackPtr++;
+                }
+            }
+            else // if the node doesnt have children then get the gravity accel from the particles inside the node
+            {
+                //gravAccel += CalcGravAccelFromLeafNode(index, particlePos);
+            }
+        }
+    }
+    
+    return gravAccel;
 }
 
 // kernel 0
@@ -137,7 +226,14 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
+    float3 gravityAccel = float3(0, 0, 0);
     
+    for (int i = 1; i < 9; i++)
+    {
+        gravityAccel += GetGravityAccelFromOctreeChildren(i, (usePredictions) ? PredictedPositions[id.x] : Positions[id.x]);
+    }
+    
+    Velocities[id.x] += gravityAccel * deltaTime;
 }
 
 // kernel 3
