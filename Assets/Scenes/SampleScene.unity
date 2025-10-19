@@ -6580,7 +6580,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 24244b53b0429944d8990f2c0540d9a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  NumOfLayers: 6
+  NumOfLayers: 5
   DisplayOctree: 1
   SpatialCompute: {fileID: 7200000, guid: c7bb5f47370efe945acee1070e3d0c42, type: 3}
   SpatialKeys: 
@@ -13921,9 +13921,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b9b0266f38cbc4749a8abb04c0633360, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particlesPerSide: 40
+  particlesPerSide: 30
   spawnCentre: {x: 0, y: 0, z: 0}
-  spawnSize: 30
+  spawnSize: 15
   startingVelocity: {x: 0, y: 0, z: 0}
   randomOffsetStrength: 0.5
 --- !u!1 &1374176186
@@ -14044,7 +14044,7 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   fixedTimeStep: 0
   timeScale: 1
-  gravity: 0.05
+  gravity: 0.1
   particleMass: 0.1
   barnesHutAccuracyThreshold: 0.25
   softeningLength: 0.0005
@@ -14216,7 +14216,7 @@ MonoBehaviour:
     m_NumColorKeys: 4
     m_NumAlphaKeys: 2
   gradientResolution: 50
-  densityDisplayMax: 30
+  densityDisplayMax: 20
   velocityDisplayMax: 6
   useVelocityDisplay: 0
 --- !u!1 &1810665982
