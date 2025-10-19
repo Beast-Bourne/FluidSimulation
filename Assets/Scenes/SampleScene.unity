@@ -6580,7 +6580,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 24244b53b0429944d8990f2c0540d9a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  NumOfLayers: 5
+  NumOfLayers: 6
   DisplayOctree: 1
   SpatialCompute: {fileID: 7200000, guid: c7bb5f47370efe945acee1070e3d0c42, type: 3}
   SpatialKeys: 
@@ -13923,7 +13923,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
-  spawnSize: 15
+  spawnSize: 30
   startingVelocity: {x: 0, y: 0, z: 0}
   randomOffsetStrength: 0.5
 --- !u!1 &1374176186
@@ -14042,17 +14042,15 @@ MonoBehaviour:
   display: {fileID: 1749289515}
   octreeManager: {fileID: 951483483}
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
-  fixedTimeStep: 1
+  fixedTimeStep: 0
   timeScale: 1
-  gravity: 0.5
+  gravity: 0.05
   particleMass: 0.1
-  barnesHutAccuracyThreshold: 0.15
+  barnesHutAccuracyThreshold: 0.25
   softeningLength: 0.0005
   damping: 0.8
   smoothingRadius: 0.5
-  targetDensity: 100
   pressureMultiplier: 120
-  nearPressureMultiplier: 0
   viscocityMultiplier: 0.1
   gasConstant: 1
   adiabaticIndex: 1.4
@@ -14218,7 +14216,7 @@ MonoBehaviour:
     m_NumColorKeys: 4
     m_NumAlphaKeys: 2
   gradientResolution: 50
-  densityDisplayMax: 75
+  densityDisplayMax: 30
   velocityDisplayMax: 6
   useVelocityDisplay: 0
 --- !u!1 &1810665982

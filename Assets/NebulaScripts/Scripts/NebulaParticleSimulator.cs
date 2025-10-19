@@ -33,9 +33,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float softeningLength;
     public float damping;
     public float smoothingRadius = 2;
-    public float targetDensity;
     public float pressureMultiplier;
-    public float nearPressureMultiplier;
     public float viscocityMultiplier;
     public float gasConstant;
     public float adiabaticIndex;
@@ -155,10 +153,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetVector("boundSize", new Vector3(octreeManager.BoundSize, octreeManager.BoundSize, octreeManager.BoundSize));
         compute.SetFloat("damping", damping);
         compute.SetFloat("smoothingRadius", smoothingRadius);
-        compute.SetFloat("targetDensity", targetDensity);
         compute.SetFloat("pressureMultiplier", pressureMultiplier);
         compute.SetBool("usePredictions", usePredictions);
-        compute.SetFloat("nearPressureMultiplier", nearPressureMultiplier);
         compute.SetFloat("viscocityMultiplier", viscocityMultiplier);
         compute.SetFloat("gasConstant", gasConstant);
         compute.SetFloat("adiabaticIndex", adiabaticIndex);

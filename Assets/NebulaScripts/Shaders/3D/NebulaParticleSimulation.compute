@@ -48,9 +48,7 @@ const float deltaTime;
 const float3 boundSize;
 const float damping;
 const float smoothingRadius;
-const float targetDensity;
 const float pressureMultiplier;
-const float nearPressureMultiplier;
 const float viscocityMultiplier;
 const bool usePredictions;
 const float gasConstant;
@@ -85,7 +83,7 @@ void HandleCollisions(int particleIndex)
     Velocities[particleIndex] = vel;
 }
 
-float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos)
+float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint particleIndex)
 {
     float3 gravAccel = float3(0, 0, 0);
     float sqrSoftening = softeningLength * softeningLength;
@@ -107,6 +105,8 @@ float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos)
             if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
             
             uint adjacentIndex = indexData[0];
+            if (adjacentIndex == particleIndex) continue; // skips self interaction
+            
             float3 adjacentPos = (usePredictions) ? PredictedPositions[adjacentIndex] : Positions[adjacentIndex];
             float3 offsetToAdjacent = adjacentPos - particlePos;
             float distToAdjacent = length(offsetToAdjacent);
@@ -120,7 +120,7 @@ float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos)
     return gravAccel;
 }
 
-float3 GetGravityAccelFromOctreeChildren(uint parentIndex, float3 particlePos)
+float3 GetGravityAccelFromOctreeChildren(uint parentIndex, float3 particlePos, uint particleIndex)
 {
     float3 gravAccel = float3(0,0,0);
     float sqrSoftening = softeningLength * softeningLength;
@@ -142,7 +142,7 @@ float3 GetGravityAccelFromOctreeChildren(uint parentIndex, float3 particlePos)
         float3 offset = node.centreOfMass - particlePos;
         float d = length(offset);
         
-        if (d <= 0) continue; // skips calculations if the particle is at the same position as the node's centre of mass
+        if (d <= 0) continue; // skips calculations to prevent a divide by zero error
         
         float s = node.size;
         
@@ -164,7 +164,7 @@ float3 GetGravityAccelFromOctreeChildren(uint parentIndex, float3 particlePos)
             }
             else // if the node doesnt have children then get the gravity accel from the particles inside the node
             {
-                //gravAccel += CalcGravAccelFromLeafNode(index, particlePos);
+                gravAccel += CalcGravAccelFromLeafNode(index, particlePos, particleIndex);
             }
         }
     }
@@ -230,7 +230,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     
     for (int i = 1; i < 9; i++)
     {
-        gravityAccel += GetGravityAccelFromOctreeChildren(i, (usePredictions) ? PredictedPositions[id.x] : Positions[id.x]);
+        gravityAccel += GetGravityAccelFromOctreeChildren(i, (usePredictions) ? PredictedPositions[id.x] : Positions[id.x], id.x);
     }
     
     Velocities[id.x] += gravityAccel * deltaTime;
@@ -265,6 +265,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
             if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
             
             uint adjacentIndex = indexData[0];
+            
             float3 adjacentPos = (usePredictions) ? PredictedPositions[adjacentIndex] : Positions[adjacentIndex];
             float3 offsetToAdjacent = adjacentPos - pos;
             float sqrDistToAdjacent = dot(offsetToAdjacent, offsetToAdjacent);
@@ -273,7 +274,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
             
             float dist = sqrt(sqrDistToAdjacent);
             density += Pow2Influence(dist, smoothingRadius);
-            nearDensity += Pow3Influence(dist, smoothingRadius);
+            //nearDensity += Pow3Influence(dist, smoothingRadius);
         }
     }
     
