@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -38,6 +39,13 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float gasConstant;
     public float adiabaticIndex;
     public bool usePredictions;
+    public bool isPaused;
+
+    [Header("Data Collection Settings")]
+    public bool enableDataCollection;
+    public float TimeBetweenSamples;
+    public float TotalSampleTime;
+    public string logFileName;
 
     // kernel IDs for the compute shader
     const int UpdatePredictionsKernel = 0;
@@ -49,10 +57,12 @@ public class NebulaParticleSimulator : MonoBehaviour
     const int updatePositionKernel = 6;
 
     // other
-    public bool isPaused;
     bool isPausedNextFrame;
     NebulaParticleSpawner.ParticleSpawnData spawnData;
     public int particleCount { get; private set; }
+    float timeElapsed;
+    float totalTimeElapsed;
+    List<string> logData = new List<string>();
 
     // Initialisation. Gets the spawn data from the spawner and sets the initial buffer data before telling the display to initialise
     private void Start()
@@ -105,6 +115,16 @@ public class NebulaParticleSimulator : MonoBehaviour
         }
 
         HandleUserImput();
+
+        if (totalTimeElapsed < TotalSampleTime && enableDataCollection)
+        {
+            SampleFrameRate(Time.deltaTime);
+        }
+        else if (enableDataCollection && totalTimeElapsed >= TotalSampleTime)
+        {
+            enableDataCollection = false;
+            Debug.Log("Finished Data Collection");
+        }
     }
 
     // Runs the simulation step in fixed time intervals if the fixedTimeStep variable is set to true
@@ -196,6 +216,27 @@ public class NebulaParticleSimulator : MonoBehaviour
             isPaused = false;
             isPausedNextFrame = true;
         }
+    }
+
+    void SampleFrameRate(float deltaTime)
+    {
+        totalTimeElapsed += deltaTime;
+        timeElapsed += deltaTime;
+
+        if (timeElapsed >= TimeBetweenSamples)
+        {
+            float fps = 1.0f / deltaTime;
+            logData.Add($"{totalTimeElapsed:F2},{fps:F2}");
+            timeElapsed = 0.0f;
+        }
+    }
+
+    private void OnApplicationQuit()
+    {
+        string path = Path.Combine("C:/My_Storage/Python_Stuff/FluidSimDataLogs/TextData", logFileName);
+        if (File.Exists(path)) { Debug.Log("Log attempted for file name that already exists"); return; }
+        File.WriteAllLines(path, logData);
+        Debug.Log($"Logged Frame Data to path: {path}");
     }
 
     // Clears the memory of all the buffers from the compute shader when the program is closed
