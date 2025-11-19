@@ -4,6 +4,7 @@
 #pragma kernel CalculateGravity
 #pragma kernel CalculateDensities
 #pragma kernel CalculatePressureForce
+#pragma kernel CalculateEnergies
 #pragma kernel CalculateViscosities
 #pragma kernel UpdatePositions
 
@@ -29,6 +30,7 @@ RWStructuredBuffer<float3> Positions;
 RWStructuredBuffer<float3> Velocities;
 RWStructuredBuffer<float2> Densities; // Densities[i].x is the density and Densities[i].y is the near density
 RWStructuredBuffer<float3> PredictedPositions;
+RWStructuredBuffer<float> InternalEnergies;
 
 // the SpatialIndices buffer is sorted by key and hash, so that all particles with the same key are grouped together
 RWStructuredBuffer<uint3> SpatialIndices; // SpatialIndices[i].x is the particleIndex, .y is the hash and .z is the key
@@ -289,7 +291,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     
     float density = Densities[id.x][0];
-    float pressure = gasConstant * pow(abs(density), adiabaticIndex);
+    float pressure = (adiabaticIndex - 1) * Densities[id.x][0] * InternalEnergies[id.x];
     float3 pressureForce = float3(0, 0, 0);
     
     float3 pos = (usePredictions)? PredictedPositions[id.x] : Positions[id.x];
@@ -315,7 +317,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             if (adjIndex == id.x) continue;
             
             float3 adjPos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
-            float3 offsetToAdj = pos - adjPos; //float3 offsetToAdj = adjPos - pos;
+            float3 offsetToAdj = pos - adjPos;
             float sqrtDistToAdj = dot(offsetToAdj, offsetToAdj);
             
             if (sqrtDistToAdj > sqrSmoothRadius) continue;
@@ -324,7 +326,8 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             
             float adjDensity = Densities[adjIndex][0];
-            float adjPressure = gasConstant * pow(abs(adjDensity), adiabaticIndex);
+            float adjInternalEnergy = InternalEnergies[adjIndex];
+            float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
             
             float sharedPressure = (pressure + adjPressure) * 0.5;
             
@@ -338,6 +341,69 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 5
+// calculates the internal energy for each particle
+[numthreads(threadCount, 1, 1)]
+void CalculateEnergies(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    
+    float dens = Densities[id.x][0];
+    float intEnergy = InternalEnergies[id.x];
+    float pressure = (adiabaticIndex - 1) * dens * intEnergy;
+    
+    float3 pos = (usePredictions) ? PredictedPositions[id.x] : Positions[id.x];
+    float3 vel = Velocities[id.x];
+    
+    float energyChange = 0;
+    
+    float sqrSmoothRadius = smoothingRadius * smoothingRadius;
+    int3 originGridPos = GetGridPos3D(pos, smoothingRadius);
+    
+    
+    for (int i = 0; i < 27; i++)
+    {
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = SpatialOffsets[key];
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = SpatialIndices[index];
+            index++;
+            
+            if (indexData[2] != key) break;
+            if (indexData[1] != hash) continue;
+            
+            uint adjIndex = indexData[0];
+            if (adjIndex == id.x) continue;
+            
+            float3 adjPos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
+            float3 adjVel = Velocities[adjIndex];
+            
+            float3 offsetToAdj = pos - adjPos;
+            float sqrtDistToAdj = dot(offsetToAdj, offsetToAdj);
+            if (sqrtDistToAdj > sqrSmoothRadius) continue;
+            
+            float dist = sqrt(sqrtDistToAdj);
+            float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
+            
+            float adjDensity = Densities[adjIndex][0];
+            float adjInternalEnergy = InternalEnergies[adjIndex];
+            float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
+            float3 gradW = Pow2DerivativeInfluence(dist, smoothingRadius) * dirToAdj;
+            
+            float pressTerm = (pressure / (dens * dens)) + (adjPressure / (adjDensity * adjDensity));
+            float velDivTerm = dot(vel - adjVel, gradW);
+            
+            energyChange += 0.5 * particleMass * pressTerm * velDivTerm;
+        }
+    }
+    
+    float change = energyChange * deltaTime;
+    InternalEnergies[id.x] = max(intEnergy + change, 1e-8);
+}
+
+// kernel 6
 // calculates the viscosity force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculateViscosities(uint3 id : SV_DispatchThreadID)
@@ -386,7 +452,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
     
 }
 
-// kernel 6
+// kernel 7
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)

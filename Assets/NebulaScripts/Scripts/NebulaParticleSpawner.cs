@@ -14,10 +14,11 @@ public class NebulaParticleSpawner : MonoBehaviour
 
     // This function generates the spawn data for particles in a 3D bounds
     // it applies jitter so they particles arent in a uniform grid
-    public ParticleSpawnData GetSpawnData()
+    public ParticleSpawnData GetSpawnData(float adiabaticIndex, float InitialTemp, float boltzmannConst, float protonMass, float MeanMolecularWeight)
     {
         ParticleSpawnData data = new ParticleSpawnData(particlesPerSide * particlesPerSide * particlesPerSide);
 
+        float initialEnergy = (boltzmannConst * InitialTemp) / (protonMass * MeanMolecularWeight * (adiabaticIndex - 1f));
         int particleNum = 0;
 
         for (int x = 0; x < particlesPerSide; x++)
@@ -37,6 +38,7 @@ public class NebulaParticleSpawner : MonoBehaviour
                     float3 randOffset = UnityEngine.Random.insideUnitSphere * randomOffsetStrength;
                     data.positions[particleNum] = new float3(px, py, pz) + randOffset;
                     data.velocities[particleNum] = startingVelocity;
+                    data.energies[particleNum] = initialEnergy;
                     particleNum++;
                 }
             }
@@ -59,12 +61,14 @@ public class NebulaParticleSpawner : MonoBehaviour
     {
         public float3[] positions;
         public float3[] velocities;
+        public float[] energies;
 
         // Constructor
         public ParticleSpawnData(int num)
         {
             positions = new float3[num];
             velocities = new float3[num];
+            energies = new float[num];
         }
     }
 }

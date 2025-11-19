@@ -14044,10 +14044,6 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   fixedTimeStep: 0
   timeScale: 1
-  gravity: 0.05
-  particleMass: 0.1
-  barnesHutAccuracyThreshold: 0.75
-  softeningLength: 0.0005
   damping: 0.8
   smoothingRadius: 0.5
   pressureMultiplier: 120
@@ -14056,10 +14052,18 @@ MonoBehaviour:
   adiabaticIndex: 1.4
   usePredictions: 1
   isPaused: 0
+  gravity: 0.05
+  particleMass: 0.1
+  barnesHutAccuracyThreshold: 0.75
+  softeningLength: 0.0005
+  InitialTemperature: 50
+  BoltzmannConstant: 0.05
+  ProtonMass: 0.09
+  MeanMolecularWeight: 2.3
   enableDataCollection: 0
   TimeBetweenSamples: 0.1
   TotalSampleTime: 60
-  logFileName: TestLog3
+  logFileName: PrototypeLog
 --- !u!1 &1417070273
 GameObject:
   m_ObjectHideFlags: 0
