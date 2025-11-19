@@ -112,8 +112,10 @@ float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint partic
             float3 adjacentPos = (usePredictions) ? PredictedPositions[adjacentIndex] : Positions[adjacentIndex];
             float3 offsetToAdjacent = adjacentPos - particlePos;
             float distToAdjacent = length(offsetToAdjacent);
+            if (distToAdjacent <= 0) continue; // skips calculations to prevent a divide by zero error
             
             float3 dir = offsetToAdjacent / distToAdjacent;
+            float dist = max(distToAdjacent * distToAdjacent + sqrSoftening, 1e-5);
             float gravMag = gravity * particleMass * pow(distToAdjacent * distToAdjacent + sqrSoftening, -1.5);
             gravAccel += dir * gravMag;
         }
@@ -280,6 +282,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
         }
     }
     
+    density = max(density, 1e-8);
     Densities[id.x] = float2(density, nearDensity);
 }
 

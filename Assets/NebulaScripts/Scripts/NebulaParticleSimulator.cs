@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using Unity.Mathematics;
+using Unity.VisualScripting;
 using UnityEngine;
 
 public class NebulaParticleSimulator : MonoBehaviour
@@ -198,11 +199,11 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("Pow3DerivativeFactor", 30 / (Mathf.PI * Mathf.Pow(smoothingRadius, 5)));
         compute.SetFloat("PolynomialPow6Factor", 4 / (Mathf.PI * Mathf.Pow(smoothingRadius, 8)));
 
-        float[] energies = new float[particleCount];
-        InternalEnergyBuffer.GetData(energies);
+        float2[] energies = new float2[particleCount];
+        densityBuffer.GetData(energies);
         for (int i = 0; i < particleCount; i++)
         {
-            if (energies[i] >= 300)
+            if (energies[i].x.IsUnityNull())
             {
                 print(energies[i]);
             }

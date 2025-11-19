@@ -14055,7 +14055,7 @@ MonoBehaviour:
   gravity: 0.05
   particleMass: 0.1
   barnesHutAccuracyThreshold: 0.75
-  softeningLength: 0.0005
+  softeningLength: 0.005
   InitialTemperature: 50
   BoltzmannConstant: 0.05
   ProtonMass: 0.09
@@ -14224,9 +14224,13 @@ MonoBehaviour:
     m_NumColorKeys: 4
     m_NumAlphaKeys: 2
   gradientResolution: 50
-  densityDisplayMax: 20
+  densityDisplayMin: 7.5
+  densityDisplayMax: 8
+  velocityDisplayMin: 0
   velocityDisplayMax: 6
-  useVelocityDisplay: 0
+  energyDisplayMin: 0
+  energyDisplayMax: 50
+  displayMode: 0
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

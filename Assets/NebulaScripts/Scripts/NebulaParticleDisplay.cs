@@ -2,6 +2,13 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum ParticleDisplayMode
+{
+    Density = 0,
+    Velocity = 1,
+    Energy = 2
+}
+
 public class NebulaParticleDisplay : MonoBehaviour
 {
     
@@ -18,9 +25,13 @@ public class NebulaParticleDisplay : MonoBehaviour
     [Header("Display Settings")]
     public Gradient colourMap;
     public int gradientResolution;
+    public float densityDisplayMin;
     public float densityDisplayMax;
+    public float velocityDisplayMin;
     public float velocityDisplayMax;
-    public bool useVelocityDisplay;
+    public float energyDisplayMin;
+    public float energyDisplayMax;
+    public ParticleDisplayMode displayMode;
 
     ComputeBuffer argsBuffer;
     Bounds bounds;
@@ -35,6 +46,7 @@ public class NebulaParticleDisplay : MonoBehaviour
         material.SetBuffer("positions", sim.positionBuffer);
         material.SetBuffer("velocities", sim.velocityBuffer);
         material.SetBuffer("densities", sim.densityBuffer);
+        material.SetBuffer("energies", sim.InternalEnergyBuffer);
 
         argsBuffer = ComputeHelper.CreateArgsBuffer(mesh, sim.positionBuffer.count);
         bounds = new Bounds(Vector3.zero, Vector3.one * 10000);
@@ -58,10 +70,14 @@ public class NebulaParticleDisplay : MonoBehaviour
             needsUpdate = false;
             TextureFromGradient(ref gradientTexture, gradientResolution, colourMap);
             material.SetTexture("ColourMap", gradientTexture);
+            material.SetFloat("densityMin", densityDisplayMin);
             material.SetFloat("densityMax", densityDisplayMax);
             material.SetFloat("scale", scale);
+            material.SetFloat("velocityMin", velocityDisplayMin);
             material.SetFloat("velocityMax", velocityDisplayMax);
-            material.SetInt("useVelocity", useVelocityDisplay ? 1 : 0);
+            material.SetFloat("energyMin", energyDisplayMin);
+            material.SetFloat("energyMax", energyDisplayMax);
+            material.SetInt("displayType", (int)displayMode);
 
             // check if the below can be removed
             material.SetColor("colour", colour);

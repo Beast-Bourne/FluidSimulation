@@ -22,14 +22,19 @@ Shader "Hidden/Particle3D"
             StructuredBuffer<float3> positions;
             StructuredBuffer<float3> velocities;
             StructuredBuffer<float2> densities;
+            StructuredBuffer<float> energies;
 
             Texture2D<float4> ColourMap;
             SamplerState linear_clamp_sampler;
             
             float scale;
+            float densityMin;
             float densityMax;
+            float velocityMin;
             float velocityMax;
-            bool useVelocity;
+            float energyMin;
+            float energyMax;
+            int displayType;
 
             float3 colour; // check if this can be removed
             float4x4 localToWorld;
@@ -45,14 +50,20 @@ Shader "Hidden/Particle3D"
             v2f vert (appdata_full v, uint instanceID : SV_InstanceID)
             {
                 float density = densities[instanceID].x;
-                float densityT = saturate(density / densityMax);
+                float densityT = saturate((density - densityMin) / (densityMax - densityMin));
                 float colT = densityT;
 
-                if (useVelocity)
+                if (displayType == 1)
                 {
                     float velocity = length(velocities[instanceID]);
-                    float velocityT = saturate(velocity / velocityMax);
+                    float velocityT = saturate((velocity - velocityMin) / (velocityMax - velocityMin));
                     colT = velocityT;
+                }
+                else if (displayType == 2)
+                {
+                    float energy = energies[instanceID];
+                    float energyT = saturate((energy - energyMin) / (energyMax - energyMin));
+                    colT = energyT;
                 }
 
                 float3 centreWorld = positions[instanceID];
