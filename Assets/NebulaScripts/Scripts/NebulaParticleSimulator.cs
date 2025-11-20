@@ -95,7 +95,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         spatialIndices = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
         spatialOffsets = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
         OctreeBuffer = ComputeHelper.CreateStructuredBuffer<OctreeNode>(octreeManager.NumOfNodes);
-        SpatialHashes = ComputeHelper.CreateStructuredBuffer<uint>(octreeManager.NumBottomLayerNodes*8);
+        SpatialHashes = ComputeHelper.CreateStructuredBuffer<uint>(octreeManager.NumBottomLayerNodes * (int)octreeManager.NumOfHashesPerLeafNode); // need to make this work with the octree sizes
         InternalEnergyBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         debugBuffer = ComputeHelper.CreateStructuredBuffer<float2>(10);
 
@@ -117,7 +117,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         sorter = new();
         sorter.SetBuffers(spatialIndices, spatialOffsets);
 
-        octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, smoothingRadius*2.0f, spatialIndices, spatialOffsets, particleCount, positionBuffer, particleMass);
+        octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, smoothingRadius, spatialIndices, spatialOffsets, particleCount, positionBuffer, particleMass);
 
         display.Init(this);
     }

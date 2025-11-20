@@ -22,6 +22,8 @@ RWStructuredBuffer<float3> Positions;
 RWStructuredBuffer<uint3> SpatialIndices;
 RWStructuredBuffer<uint> SpatialOffsets;
 
+const uint subDivisions;
+
 const uint bottomLayerStartIndex;
 const uint numBottomLayerNodes;
 const float smoothingRadius;
@@ -52,21 +54,31 @@ void SetSpatialData (uint3 id : SV_DispatchThreadID)
     if (id.x >= numBottomLayerNodes) return;
     
     uint index = bottomLayerStartIndex + id.x;
-    uint spatialStartIndex = id.x * 8;
+    uint numOfSpatialEntriesPerNode = subDivisions * subDivisions * subDivisions;
+    uint spatialStartIndex = id.x * numOfSpatialEntriesPerNode;
     
     Octree[index].spatialStartIndex = spatialStartIndex;
     
-    for (int i = 0; i < 8; i++)
+    float halfSize = Octree[index].size * 0.5;
+    float subSize = Octree[index].size / subDivisions;
+    int indexOffset = 0;
+    
+    for (uint x = 0; x < subDivisions; x++)
     {
-        float quartSize = Octree[index].size * 0.25;
-        float3 pos = Octree[index].centre + (quartSize * OctreeOffsets[i]);
-        
-        int3 GridPos = GetGridPos3D(pos, smoothingRadius);
-        uint hash = HashGridPos3D(GridPos);
-        
-        SpatialHashes[spatialStartIndex + i] = hash;
+        for (uint y = 0; y < subDivisions; y++)
+        {
+            for (uint z = 0; z < subDivisions; z++)
+            {
+                float3 pos = Octree[index].centre - (halfSize + ((float3(x+0.5f, y+0.5f, z+0.5f) * subSize)));
+                
+                int3 GridPos = GetGridPos3D(pos, smoothingRadius);
+                uint hash = HashGridPos3D(GridPos);
+                
+                SpatialHashes[spatialStartIndex + indexOffset] = hash;
+                indexOffset += 1;
+            }
+        }
     }
-
 }
 
 // kernel 2
@@ -79,11 +91,11 @@ void UpdateMasses(uint3 id : SV_DispatchThreadID)
     uint index = currentLayerStartIndex + id.x;
     float3 centreOfMass = float3(0, 0, 0);
     float totalMass = 0.0000000001f; // prevents a divide by zero error (should be fine as along as its not similar to the particle mass)
-    
+    uint numOfSpatialEntriesPerNode = subDivisions * subDivisions * subDivisions;
     
     if (!Octree[index].hasChildren)
     {
-        for (int i = 0; i < 8; i++)
+        for (uint i = 0; i < numOfSpatialEntriesPerNode; i++)
         {
             uint hash = SpatialHashes[Octree[index].spatialStartIndex + i];
             uint key = KeyFromHash(hash, numParticles);

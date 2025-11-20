@@ -4,6 +4,8 @@ public class OctreeManager : MonoBehaviour
 {
     [SerializeField]
     private uint NumOfLayers;
+    [SerializeField, Range(1, 4)]
+    private uint LeafNodeSizeMuliplier;
     [SerializeField]
     private bool DisplayOctree;
     [SerializeField]
@@ -20,6 +22,8 @@ public class OctreeManager : MonoBehaviour
     public int NumOfNodes { get { return ((int)IntPow(8, NumOfLayers) - 1) / 7; } }
     [HideInInspector]
     public int NumBottomLayerNodes { get { return (int)IntPow(8, NumOfLayers - 1); } }
+    [HideInInspector]
+    public uint NumOfHashesPerLeafNode { get { return IntPow(LeafNodeSizeMuliplier, 3); } }
 
     private Vector3[] childOffsets = 
     {
@@ -43,6 +47,8 @@ public class OctreeManager : MonoBehaviour
         uint EndOfDefinedNodesIndex = 0;
         Octree[0] = CreateRootNode(minSize);
 
+        // the root node above is layer 1
+        // this loop then generates all layers below it (start by generating layer 2)
         for (int i = 0; i < NumOfLayers - 1; i++)
         {
             GenerateNextLayer();
@@ -54,8 +60,8 @@ public class OctreeManager : MonoBehaviour
             {
                 if (CurrentLayerStartIndex + i >= NextLayerStartIndex)
                 {
-                    CurrentLayerStartIndex = NextLayerStartIndex;
-                    NextLayerStartIndex = EndOfDefinedNodesIndex + 1;
+                    CurrentLayerStartIndex = NextLayerStartIndex; // moves from 0 -> 1 -> 9 -> 73 etc
+                    NextLayerStartIndex = EndOfDefinedNodesIndex + 1; // moves from 1 -> 9 -> 73 -> 585 etc
                     currentLayer++;
                     break;
                 }
@@ -68,8 +74,9 @@ public class OctreeManager : MonoBehaviour
         void GenerateChildren(uint ParentIndex, float childSize)
         {
             Octree[ParentIndex].FirstChildIndex = EndOfDefinedNodesIndex + 1;
-            uint hasChildren = (currentLayer + 1 < NumOfLayers) ? (uint)1 : 0;
+            uint hasChildren = (currentLayer + 1 < NumOfLayers) ? (uint)1 : 0; // does the child node being generated also have children?
 
+            // generate the 8 children for this parent
             for (uint i = 0; i < 8; i++)
             {
                 EndOfDefinedNodesIndex++;
@@ -81,9 +88,9 @@ public class OctreeManager : MonoBehaviour
         }
     }
 
-    public void SetBuffers(ComputeBuffer OctreeBuffer, ComputeBuffer HashBuffer, float octreeMinSize, ComputeBuffer indexBuffer, ComputeBuffer offsetBuffer, int numParticles, ComputeBuffer posBuffer, float particleMass)
+    public void SetBuffers(ComputeBuffer OctreeBuffer, ComputeBuffer HashBuffer, float smoothingRadius, ComputeBuffer indexBuffer, ComputeBuffer offsetBuffer, int numParticles, ComputeBuffer posBuffer, float particleMass)
     {
-        BuildOctree(octreeMinSize);
+        BuildOctree(smoothingRadius * LeafNodeSizeMuliplier);
 
         OctreeNode[] allNodes = new OctreeNode[Octree.Length];
         System.Array.Copy(Octree, allNodes, Octree.Length);
@@ -95,9 +102,10 @@ public class OctreeManager : MonoBehaviour
         ComputeHelper.SetBuffer(SpatialCompute, offsetBuffer, "SpatialOffsets", 1);
         ComputeHelper.SetBuffer(SpatialCompute, posBuffer, "Positions", 1);
 
+        SpatialCompute.SetInt("subDivisions", (int)LeafNodeSizeMuliplier);
         SpatialCompute.SetInt("bottomLayerStartIndex", ((int)IntPow(8, NumOfLayers-1) - 1) / 7);
         SpatialCompute.SetInt("numBottomLayerNodes", NumBottomLayerNodes);
-        SpatialCompute.SetFloat("smoothingRadius", octreeMinSize/2.0f);
+        SpatialCompute.SetFloat("smoothingRadius", smoothingRadius);
         SpatialCompute.SetInt("numParticles", numParticles);
         SpatialCompute.SetFloat("particleMass", particleMass);
 
@@ -165,7 +173,7 @@ public class OctreeManager : MonoBehaviour
         if (Octree == null)
         {
             Gizmos.color = Color.white;
-            float boundSize = 1.0f * IntPow(2, NumOfLayers - 1);
+            float boundSize = 0.5f * LeafNodeSizeMuliplier * IntPow(2, NumOfLayers - 1);
             Gizmos.DrawWireCube(Vector3.zero, new Vector3(boundSize, boundSize, boundSize));
         }
     }

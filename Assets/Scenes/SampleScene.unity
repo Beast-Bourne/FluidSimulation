@@ -6581,6 +6581,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   NumOfLayers: 5
+  LeafNodeSizeMuliplier: 4
   DisplayOctree: 1
   SpatialCompute: {fileID: 7200000, guid: c7bb5f47370efe945acee1070e3d0c42, type: 3}
   SpatialKeys: 
@@ -14043,16 +14044,16 @@ MonoBehaviour:
   octreeManager: {fileID: 951483483}
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   fixedTimeStep: 0
-  timeScale: 1
+  timeScale: 0.5
   damping: 0.8
   smoothingRadius: 0.5
-  pressureMultiplier: 120
-  viscocityMultiplier: 0.1
+  pressureMultiplier: 0.75
+  viscocityMultiplier: 0.5
   gasConstant: 1
   adiabaticIndex: 1.4
   usePredictions: 1
   isPaused: 0
-  gravity: 0.05
+  gravity: 0.1
   particleMass: 0.1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.005
@@ -14060,9 +14061,12 @@ MonoBehaviour:
   BoltzmannConstant: 0.05
   ProtonMass: 0.09
   MeanMolecularWeight: 2.3
-  coolingLambda: 1
-  coolingAlpha: 1
+  coolingLambda: 0.001
+  coolingAlpha: 0.001
   coolingSubcycles: 4
+  viscocityAlpha: 0.0001
+  viscocityBeta: 0.0002
+  viscocityEpsilon: 0.005
   enableDataCollection: 0
   TimeBetweenSamples: 0.1
   TotalSampleTime: 60
@@ -14231,8 +14235,8 @@ MonoBehaviour:
   densityDisplayMax: 8
   velocityDisplayMin: 0
   velocityDisplayMax: 6
-  energyDisplayMin: 0
-  energyDisplayMax: 50
+  energyDisplayMin: 10
+  energyDisplayMax: 40
   displayMode: 0
 --- !u!1 &1810665982
 GameObject:
