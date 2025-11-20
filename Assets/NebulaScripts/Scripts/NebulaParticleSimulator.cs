@@ -25,6 +25,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     ComputeBuffer spatialOffsets;
     ComputeBuffer OctreeBuffer;
     ComputeBuffer SpatialHashes;
+    ComputeBuffer debugBuffer;
     BufferSorter sorter;
 
     [Header("Simulation Settings")]
@@ -45,11 +46,17 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float barnesHutAccuracyThreshold;
     public float softeningLength;
 
-    [Header("Initial Energy Settings")]
+    [Header("Energy Settings")]
     public float InitialTemperature;
     public float BoltzmannConstant;
     public float ProtonMass;
     public float MeanMolecularWeight;
+    public float coolingLambda;
+    public float coolingAlpha;
+    public int coolingSubcycles;
+    public float viscocityAlpha;
+    public float viscocityBeta;
+    public float viscocityEpsilon;
 
     [Header("Data Collection Settings")]
     public bool enableDataCollection;
@@ -90,6 +97,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         OctreeBuffer = ComputeHelper.CreateStructuredBuffer<OctreeNode>(octreeManager.NumOfNodes);
         SpatialHashes = ComputeHelper.CreateStructuredBuffer<uint>(octreeManager.NumBottomLayerNodes*8);
         InternalEnergyBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
+        debugBuffer = ComputeHelper.CreateStructuredBuffer<float2>(10);
 
         SetInitialBufferData(spawnData);
 
@@ -103,6 +111,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
         ComputeHelper.SetBuffer(compute, InternalEnergyBuffer, "InternalEnergies", pressureForceKernel, internalEnergyKernel);
+        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", internalEnergyKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -169,8 +178,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         octreeManager.UpdateOctree(); // update the octree mass values
         ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity between particles
         ComputeHelper.Dispatch(compute, particleCount, densityCalculationKernel); // calculate the density at each particle
-        ComputeHelper.Dispatch(compute, particleCount, pressureForceKernel); // calculate and apply pressure forces
         ComputeHelper.Dispatch(compute, particleCount, internalEnergyKernel); // update the internal energies of the particles
+        ComputeHelper.Dispatch(compute, particleCount, pressureForceKernel); // calculate and apply pressure forces
         ComputeHelper.Dispatch(compute, particleCount, viscosityKernel); // calculate and apply viscocity forces
         ComputeHelper.Dispatch(compute, particleCount, updatePositionKernel); // finally update the particle positions and velocities
 
@@ -193,20 +202,27 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("gasConstant", gasConstant);
         compute.SetFloat("adiabaticIndex", adiabaticIndex);
 
+        compute.SetFloat("protonMass", ProtonMass);
+        compute.SetFloat("meanMolecularWeight", MeanMolecularWeight);
+        compute.SetFloat("boltzmannConstant", BoltzmannConstant);
+        compute.SetFloat("coolingLambda", coolingLambda);
+        compute.SetFloat("coolingAlpha", coolingAlpha);
+        compute.SetInt("subcycles", coolingSubcycles);
+        compute.SetFloat("viscAlpha", viscocityAlpha);
+        compute.SetFloat("viscBeta", viscocityBeta);
+        compute.SetFloat("viscEpsilon", viscocityEpsilon);
+
         compute.SetFloat("Pow2Factor", 6 / (Mathf.PI * Mathf.Pow(smoothingRadius, 4)));
         compute.SetFloat("Pow2DerivativeFactor", 12 / (Mathf.PI * Mathf.Pow(smoothingRadius, 4)));
         compute.SetFloat("Pow3Factor", 10 / (Mathf.PI * Mathf.Pow(smoothingRadius, 5)));
         compute.SetFloat("Pow3DerivativeFactor", 30 / (Mathf.PI * Mathf.Pow(smoothingRadius, 5)));
         compute.SetFloat("PolynomialPow6Factor", 4 / (Mathf.PI * Mathf.Pow(smoothingRadius, 8)));
 
-        float2[] energies = new float2[particleCount];
-        densityBuffer.GetData(energies);
-        for (int i = 0; i < particleCount; i++)
+        float2[] energies = new float2[10];
+        debugBuffer.GetData(energies);
+        for (int i = 0; i < 10; i++)
         {
-            if (energies[i].x.IsUnityNull())
-            {
-                print(energies[i]);
-            }
+            print("Compression: " + energies[i].x + "  Visc: " + energies[i].y);
         }
     }
 
@@ -269,6 +285,6 @@ public class NebulaParticleSimulator : MonoBehaviour
     // Clears the memory of all the buffers from the compute shader when the program is closed
     private void OnDestroy()
     {
-        ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer, spatialIndices, spatialOffsets, OctreeBuffer, SpatialHashes, InternalEnergyBuffer);
+        ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer, spatialIndices, spatialOffsets, OctreeBuffer, SpatialHashes, InternalEnergyBuffer, debugBuffer);
     }
 }

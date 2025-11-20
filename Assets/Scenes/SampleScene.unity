@@ -14060,6 +14060,9 @@ MonoBehaviour:
   BoltzmannConstant: 0.05
   ProtonMass: 0.09
   MeanMolecularWeight: 2.3
+  coolingLambda: 1
+  coolingAlpha: 1
+  coolingSubcycles: 4
   enableDataCollection: 0
   TimeBetweenSamples: 0.1
   TotalSampleTime: 60
