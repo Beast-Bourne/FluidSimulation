@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
@@ -111,7 +112,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
         ComputeHelper.SetBuffer(compute, InternalEnergyBuffer, "InternalEnergies", pressureForceKernel, internalEnergyKernel);
-        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", internalEnergyKernel);
+        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", densityCalculationKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -218,11 +219,13 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("Pow3DerivativeFactor", 30 / (Mathf.PI * Mathf.Pow(smoothingRadius, 5)));
         compute.SetFloat("PolynomialPow6Factor", 4 / (Mathf.PI * Mathf.Pow(smoothingRadius, 8)));
 
+        compute.SetFloat("CubicSplineFactor", 3 / (4*smoothingRadius));//8 / (Mathf.PI * Mathf.Pow(smoothingRadius, 3)));
+
         float2[] energies = new float2[10];
         debugBuffer.GetData(energies);
         for (int i = 0; i < 10; i++)
         {
-            print("Compression: " + energies[i].x + "  Visc: " + energies[i].y);
+            print("Density: " + energies[i].x + "  Distance to neighbour " + i + ": " + energies[i].y);
         }
     }
 
