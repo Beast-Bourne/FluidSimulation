@@ -524,22 +524,21 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
             uint adjIndex = indexData[0];
             if (adjIndex == id.x) continue;
             
-            float3 particlePos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
-            float3 particleOffset = particlePos - pos;
-            float sqrDist = dot(particleOffset, particleOffset);
+            float3 adjPos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
+            float3 Offset = adjPos - pos;
+            float sqrDist = dot(Offset, Offset);
         
             if (sqrDist > sqrSmoothingRadius) continue;
         
             float dist = sqrt(sqrDist);
-            float3 particleVel = Velocities[adjIndex];
+            float3 adjacentVel = Velocities[adjIndex];
+            float adjacentDensity = Densities[adjIndex][0];
         
-            viscosityForce += (particleVel - vel) * PolynomialPow6Influence(dist, smoothingRadius);
+            viscosityForce += (adjacentVel - vel) * (particleMass / adjacentDensity) * ViscocityLaplacianInfluence(dist, smoothingRadius);
         }
     }
     
-    vel += viscosityForce * viscocityMultiplier * deltaTime;
-    Velocities[id.x] = vel;
-    
+    Velocities[id.x] += viscosityForce * viscocityMultiplier * deltaTime;
 }
 
 // kernel 7

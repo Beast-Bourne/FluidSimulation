@@ -13922,7 +13922,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b9b0266f38cbc4749a8abb04c0633360, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particlesPerSide: 35
+  particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
   spawnSize: 30
   startingVelocity: {x: 0, y: 0, z: 0}
@@ -14047,7 +14047,7 @@ MonoBehaviour:
   timeScale: 0.5
   damping: 0.8
   smoothingRadius: 0.5
-  pressureMultiplier: 1
+  pressureMultiplier: 0.25
   viscocityMultiplier: 0.1
   gasConstant: 1
   adiabaticIndex: 1.4
@@ -14237,7 +14237,7 @@ MonoBehaviour:
   velocityDisplayMax: 6
   energyDisplayMin: 10
   energyDisplayMax: 40
-  displayMode: 0
+  displayMode: 2
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

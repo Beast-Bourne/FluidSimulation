@@ -56,7 +56,7 @@ float CubicSplineInfluence(float dist, float smoothingRadius)
     
     if (q <= 0.5f)
     {
-        return (CubicSplineFactor * 6.0f * (q * q * q - q * q) + 1.0f);
+        return (CubicSplineFactor * (6.0f * (q * q * q - q * q) + 1.0f));
     }
     else if (q <= 1.0f)
     {
@@ -89,4 +89,14 @@ float CubicSplineDerivativeInfluence(float dist, float smoothingRadius)
     {
         return 0.0f;
     }
+}
+
+float ViscocityLaplacianInfluence(float dist, float smoothingRadius)
+{
+    if (dist >= smoothingRadius) return 0.0f;
+    
+    float q = dist / smoothingRadius;
+    
+    return 6 * (1 - q) / (smoothingRadius * smoothingRadius);
+
 }

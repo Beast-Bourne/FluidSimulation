@@ -9,7 +9,7 @@ public class NebulaParticleSpawner : MonoBehaviour
     public Vector3 spawnCentre;
     public float spawnSize;
 
-    public Vector3 startingVelocity;
+    public float VelocitySigma;
     public float randomOffsetStrength;
 
     // This function generates the spawn data for particles in a 3D bounds
@@ -35,9 +35,13 @@ public class NebulaParticleSpawner : MonoBehaviour
                     float py = (ty - 0.5f) * spawnSize + spawnCentre.y;
                     float pz = (tz - 0.5f) * spawnSize + spawnCentre.z;
 
+                    float velX = RandomGaussian(0f, VelocitySigma);
+                    float velY = RandomGaussian(0f, VelocitySigma);
+                    float velZ = RandomGaussian(0f, VelocitySigma);
+
                     float3 randOffset = UnityEngine.Random.insideUnitSphere * randomOffsetStrength;
                     data.positions[particleNum] = new float3(px, py, pz) + randOffset;
-                    data.velocities[particleNum] = startingVelocity;
+                    data.velocities[particleNum] = new float3(velX, velY, velZ);
                     data.energies[particleNum] = initialEnergy;
                     particleNum++;
                 }
@@ -45,6 +49,15 @@ public class NebulaParticleSpawner : MonoBehaviour
         }
 
         return data;
+    }
+
+    float RandomGaussian(float mean, float sigma)
+    {
+        float u1 = 1.0f - UnityEngine.Random.value;
+        float u2 = 1.0f - UnityEngine.Random.value;
+
+        float randStdNormal = Mathf.Sqrt(-2.0f * Mathf.Log(u1)) * Mathf.Sin(2.0f * Mathf.PI * u2);
+        return mean + sigma * randStdNormal;
     }
 
     // draws the bounds of the spawn area in the scene view
