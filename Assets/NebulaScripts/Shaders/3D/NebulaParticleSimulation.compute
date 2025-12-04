@@ -67,6 +67,7 @@ const float subcycles;
 const float viscAlpha;
 const float viscBeta;
 const float viscEpsilon;
+const float conductionCoefficient;
 
 // checks if a particle of the given index has collided with the outer bounds and updates its position and velocity accordingly
 void HandleCollisions(int particleIndex)
@@ -333,19 +334,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
             float dist = sqrt(sqrDistToAdjacent);
             //density += (Pow2Influence(dist, smoothingRadius) * particleMass);
             density += (CubicSplineInfluence(dist, smoothingRadius) * particleMass);
-            
-            if (id.x == 5000)
-            {
-                DebugBuffer[partsUsed] = float2(0.0f, dist);
-                partsUsed++;
-            }
         }
-    }
-    
-    if (id.x == 5000)
-    {
-        DebugBuffer[9].x = density;
-        partsUsed++;
     }
     
     density = max(density, 1e-8);
@@ -398,11 +387,12 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             float adjInternalEnergy = InternalEnergies[adjIndex];
             float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
             
-            float sharedPressure = (pressure + adjPressure) * 0.5;
+            float influence = CubicSplineDerivativeInfluence(dist, smoothingRadius);
+            float3 gradW = influence * offsetToAdj;
+            float sharedPressure = (pressure / (density * density)) + (adjPressure / (adjDensity * adjDensity));
             
-            //pressureForce += dirToAdj * sharedPressure * Pow2DerivativeInfluence(dist, smoothingRadius) / adjDensity;
-            //pressureForce += dirToAdj * Pow2DerivativeInfluence(dist, smoothingRadius) * -(pressure / (density * density) + adjPressure / (adjDensity*adjDensity));
-            pressureForce += dirToAdj * CubicSplineDerivativeInfluence(dist, smoothingRadius) * -(pressure / (density * density) + adjPressure / (adjDensity * adjDensity));
+            pressureForce += -particleMass * gradW * sharedPressure;
+            //pressureForce += dirToAdj * CubicSplineDerivativeInfluence(dist, smoothingRadius) * -(pressure / (density * density) + adjPressure / (adjDensity * adjDensity));
         }
     }
     
@@ -427,8 +417,9 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
     float sqrSmoothRadius = smoothingRadius * smoothingRadius;
     int3 originGridPos = GetGridPos3D(pos, smoothingRadius);
     
-    float compTerm = 0.0;
-    float viscTerm = 0.0;
+    float compTerm = 0.0; // heating from compression
+    float viscTerm = 0.0; // heating from artificial viscosity
+    float condTerm = 0.0; // heating from thermal conduction
     
     for (int i = 0; i < 27; i++)
     {
@@ -460,15 +451,21 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
             float adjDensity = Densities[adjIndex][0];
             float adjInternalEnergy = InternalEnergies[adjIndex];
             float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
-            //float3 gradW = Pow2DerivativeInfluence(dist, smoothingRadius) * dirToAdj;
+            
             float3 gradW = CubicSplineDerivativeInfluence(dist, smoothingRadius) * dirToAdj;
             
+            // conduction term
+            float condMassFactor = (particleMass * conductionCoefficient) / (dens * adjDensity);
+            float offsetDotGradW = dot(offsetToAdj, gradW) / (sqrDistToAdj + 0.0001);
+            condTerm += 0.5 * condMassFactor * (adjInternalEnergy - intEnergy) * CubicSplineInfluence(dist, smoothingRadius);
+            
+            // compute compression term
             float pressTerm = (pressure / (dens * dens)) + (adjPressure / (adjDensity * adjDensity));
             float velDivTerm = dot(vel - adjVel, gradW);
             float compressionTerm = 0.5 * particleMass * pressTerm * velDivTerm;
             compTerm += compressionTerm;
             
-            // compute artificial viscosity only for converging particles
+            // compute artificial viscosity term only for converging particles
             float3 relVel = vel - adjVel;
             float relVelAlongOffset = dot(relVel, offsetToAdj);
             if (relVelAlongOffset < 0)
@@ -487,7 +484,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    float change = (viscTerm + compTerm) * deltaTime;
+    float change = (viscTerm + compTerm + condTerm) * deltaTime;
     InternalEnergies[id.x] = max(intEnergy + change, 1e-8);
     
     ApplyCooling(id.x);

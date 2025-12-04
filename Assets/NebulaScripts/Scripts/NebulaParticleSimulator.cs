@@ -5,6 +5,7 @@ using System.Reflection;
 using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 public class NebulaParticleSimulator : MonoBehaviour
 {
@@ -58,6 +59,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float viscocityAlpha;
     public float viscocityBeta;
     public float viscocityEpsilon;
+    public float conductionCoefficient;
 
     [Header("Data Collection Settings")]
     public bool enableDataCollection;
@@ -212,6 +214,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("viscAlpha", viscocityAlpha);
         compute.SetFloat("viscBeta", viscocityBeta);
         compute.SetFloat("viscEpsilon", viscocityEpsilon);
+        compute.SetFloat("conductionCoefficient", conductionCoefficient);
 
         compute.SetFloat("Pow2Factor", 6 / (Mathf.PI * Mathf.Pow(smoothingRadius, 4)));
         compute.SetFloat("Pow2DerivativeFactor", 12 / (Mathf.PI * Mathf.Pow(smoothingRadius, 4)));
@@ -219,13 +222,16 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("Pow3DerivativeFactor", 30 / (Mathf.PI * Mathf.Pow(smoothingRadius, 5)));
         compute.SetFloat("PolynomialPow6Factor", 4 / (Mathf.PI * Mathf.Pow(smoothingRadius, 8)));
 
-        compute.SetFloat("CubicSplineFactor", 3 / (4*smoothingRadius));//8 / (Mathf.PI * Mathf.Pow(smoothingRadius, 3)));
+        compute.SetFloat("CubicSplineFactor", 3 / (4*smoothingRadius));
 
-        float2[] energies = new float2[10];
-        debugBuffer.GetData(energies);
-        for (int i = 0; i < 10; i++)
+        float3[] vels = new float3[particleCount];
+        velocityBuffer.GetData(vels);
+        for (int i = 0; i < particleCount; i++)
         {
-            print("Density: " + energies[i].x + "  Distance to neighbour " + i + ": " + energies[i].y);
+            if (vels[i].x > 1e+8 || vels[i].y > 1e+8 || vels[i].z > 1e+8)
+            {
+                Debug.Log("Velocity Blowup Detected: " + vels[i]);
+            }
         }
     }
 
