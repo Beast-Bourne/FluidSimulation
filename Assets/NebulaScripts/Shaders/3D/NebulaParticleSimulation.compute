@@ -305,7 +305,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
     int3 originGridPos = GetGridPos3D(pos, smoothingRadius);
     float nearDensity = 0;
     float density = 0;
-    float sqrRadius = smoothingRadius * smoothingRadius;
+    float sqrRadius = (smoothingRadius + 0.25f) * (smoothingRadius + 0.25f);
     
     int partsUsed = 0;
     
@@ -333,7 +333,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
             
             float dist = sqrt(sqrDistToAdjacent);
             //density += (Pow2Influence(dist, smoothingRadius) * particleMass);
-            density += (CubicSplineInfluence(dist, smoothingRadius) * particleMass);
+            density += (CubicSplineInfluence(dist, smoothingRadius + 0.25f) * particleMass);
         }
     }
     
@@ -500,7 +500,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
     
     float3 pos = (usePredictions) ? PredictedPositions[id.x] : Positions[id.x];
     int3 gridPos = GetGridPos3D(pos, smoothingRadius);
-    float sqrSmoothingRadius = smoothingRadius * smoothingRadius;
+    float sqrSmoothRadius = smoothingRadius * smoothingRadius;
     float3 viscosityForce = 0;
     float3 vel = Velocities[id.x];
     
@@ -522,16 +522,41 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
             if (adjIndex == id.x) continue;
             
             float3 adjPos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
-            float3 Offset = adjPos - pos;
-            float sqrDist = dot(Offset, Offset);
+            float3 offsetToAdj = pos - adjPos;
+            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
         
-            if (sqrDist > sqrSmoothingRadius) continue;
+            if (sqrDistToAdj > sqrSmoothRadius) continue;
+            
+            
+            float3 adjVel = Velocities[adjIndex];
+            float3 relVel = vel - adjVel;
+            float relVelAlongOffset = dot(relVel, offsetToAdj);
+            if (relVelAlongOffset > 0) continue; // only apply viscosity for converging particles
+            
+            // get needed properties
+            float dist = sqrt(sqrDistToAdj);
+            float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
+            float intEnergy = InternalEnergies[id.x];
+            float dens = Densities[id.x][0];
+            float adjInternalEnergy = InternalEnergies[adjIndex];
+            float adjDensity = Densities[adjIndex][0];
+            
+            // compute sound speeds
+            float soundSpeed = sqrt(max(adiabaticIndex * (adiabaticIndex - 1) * intEnergy, 1e-12));
+            float adjSoundSpeed = sqrt(max(adiabaticIndex * (adiabaticIndex - 1) * adjInternalEnergy, 1e-12));
+            float avgSoundSpeed = 0.5 * (soundSpeed + adjSoundSpeed);
+            
+            // compute mass factor
+            float avgDensity = 0.5 * (dens + adjDensity);
+            float massFactor = (smoothingRadius * relVelAlongOffset) / (sqrDistToAdj + (viscEpsilon * sqrSmoothRadius));
+
+            // compute artificial viscosity term
+            float artVisc = (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
+            float3 gradW = CubicSplineDerivativeInfluence(dist, smoothingRadius) * dirToAdj;
+            float3 viscocityTerm = -0.5 * particleMass * artVisc * gradW;
+            viscosityForce += viscocityTerm;
         
-            float dist = sqrt(sqrDist);
-            float3 adjacentVel = Velocities[adjIndex];
-            float adjacentDensity = Densities[adjIndex][0];
-        
-            viscosityForce += (adjacentVel - vel) * (particleMass / adjacentDensity) * ViscocityLaplacianInfluence(dist, smoothingRadius);
+            //viscosityForce += (adjVel - vel) * (particleMass / adjacentDensity) * ViscocityLaplacianInfluence(dist, smoothingRadius);
         }
     }
     
@@ -544,6 +569,8 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
+    
+    
     
     Positions[id.x] += Velocities[id.x] * deltaTime;
     HandleCollisions(id.x);

@@ -4,7 +4,7 @@ public class OctreeManager : MonoBehaviour
 {
     [SerializeField]
     private uint NumOfLayers;
-    [SerializeField, Range(1, 4)]
+    [SerializeField, Range(1, 8)]
     private uint LeafNodeSizeMuliplier;
     [SerializeField]
     private bool DisplayOctree;
