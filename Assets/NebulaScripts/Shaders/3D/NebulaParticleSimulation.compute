@@ -31,6 +31,7 @@ RWStructuredBuffer<float3> Velocities;
 RWStructuredBuffer<float2> Densities; // Densities[i].x is the density and Densities[i].y is the near density
 RWStructuredBuffer<float3> PredictedPositions;
 RWStructuredBuffer<float> InternalEnergies;
+RWStructuredBuffer<float3> ResultantForces;
 
 RWStructuredBuffer<float2> DebugBuffer;
 
@@ -55,6 +56,7 @@ const float smoothingRadius;
 const float pressureMultiplier;
 const float viscocityMultiplier;
 const bool usePredictions;
+const bool useXSPH;
 const float gasConstant;
 const float adiabaticIndex;
 
@@ -237,6 +239,8 @@ void UpdatePredictions(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
+    ResultantForces[id.x] = float3(0, 0, 0);
+    
     const float predictionFactor = 1 / 120.0;
     float3 PredPos = Positions[id.x] + Velocities[id.x] * predictionFactor;
     
@@ -397,7 +401,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     }
     
     //float3 accel = pressureForce / density;
-    Velocities[id.x] += pressureForce * deltaTime * pressureMultiplier;
+    ResultantForces[id.x] += pressureForce * pressureMultiplier;
 }
 
 // kernel 5
@@ -560,7 +564,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
         }
     }
     
-    Velocities[id.x] += viscosityForce * viscocityMultiplier * deltaTime;
+    ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
 }
 
 // kernel 7
@@ -570,7 +574,53 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
+    Velocities[id.x] += ResultantForces[id.x] * deltaTime;
     
+    // XSPH is a velocity smoothing technique that helps reduce numerical instabilities
+    if (useXSPH)
+    {
+        float3 xsph = 0;
+        float eps = 0.05; // try 0.03..0.1
+
+        float3 pos = Positions[id.x];
+        float3 vel = Velocities[id.x];
+
+        int3 originGridPos = GetGridPos3D(pos, smoothingRadius);
+
+        for (int n = 0; n < 27; n++)
+        {
+            uint hash = HashGridPos3D(originGridPos + GridOffsets3D[n]);
+            uint key = KeyFromHash(hash, numParticles);
+            uint index = SpatialOffsets[key];
+
+            while (index < numParticles)
+            {
+                uint3 indexData = SpatialIndices[index];
+                index++;
+
+                if (indexData[2] != key) break;
+                if (indexData[1] != hash) continue;
+
+                uint j = indexData[0];
+                if (j == id.x) continue; // skip over itself
+
+                float3 adjPos = Positions[j];
+                float3 adjVel = Velocities[j];
+
+                float3 offset = pos - adjPos;
+                float sqrDist = dot(offset, offset);
+                if (sqrDist > smoothingRadius * smoothingRadius) continue;
+
+                float dist = sqrt(sqrDist);
+                float w = CubicSplineInfluence(dist, smoothingRadius); // normal density kernel
+
+                float density_j = Densities[j][0];
+
+                xsph += (adjVel - vel) * w * (particleMass / density_j);
+            }
+        }
+        Velocities[id.x] = vel + eps * xsph;
+    }
     
     Positions[id.x] += Velocities[id.x] * deltaTime;
     HandleCollisions(id.x);
