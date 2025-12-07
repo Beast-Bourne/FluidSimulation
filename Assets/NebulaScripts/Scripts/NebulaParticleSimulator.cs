@@ -96,7 +96,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         positionBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
         predictedPositionBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
         velocityBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
-        densityBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
+        densityBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         spatialIndices = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
         spatialOffsets = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
         OctreeBuffer = ComputeHelper.CreateStructuredBuffer<OctreeNode>(octreeManager.NumOfNodes);

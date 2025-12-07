@@ -14239,7 +14239,7 @@ MonoBehaviour:
   velocityDisplayMax: 6
   energyDisplayMin: 25
   energyDisplayMax: 45
-  displayMode: 0
+  displayMode: 2
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

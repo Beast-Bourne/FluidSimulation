@@ -28,7 +28,7 @@ static const int threadCount = 64;
 
 RWStructuredBuffer<float3> Positions;
 RWStructuredBuffer<float3> Velocities;
-RWStructuredBuffer<float2> Densities; // Densities[i].x is the density and Densities[i].y is the near density
+RWStructuredBuffer<float> Densities;
 RWStructuredBuffer<float3> PredictedPositions;
 RWStructuredBuffer<float> InternalEnergies;
 RWStructuredBuffer<float3> ResultantForces;
@@ -198,7 +198,7 @@ float LambdaFunction(float temp)
 
 void ApplyCooling(int particleIndex)
 {
-    float dens = Densities[particleIndex][0];
+    float dens = Densities[particleIndex];
     float intEnergy = InternalEnergies[particleIndex];
     
     float temp = intEnergy * (adiabaticIndex - 1) * protonMass * meanMolecularWeight / boltzmannConstant;
@@ -307,9 +307,8 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
     float3 pos = (usePredictions)? PredictedPositions[id.x] : Positions[id.x];
     
     int3 originGridPos = GetGridPos3D(pos, smoothingRadius);
-    float nearDensity = 0;
     float density = 0;
-    float sqrRadius = (smoothingRadius + 0.25f) * (smoothingRadius + 0.25f);
+    float sqrRadius = (smoothingRadius + 0.f) * (smoothingRadius + 0.f);
     
     int partsUsed = 0;
     
@@ -336,13 +335,12 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
             if (sqrDistToAdjacent > sqrRadius) continue; // if the particle is outside the smoothing radius then skip it
             
             float dist = sqrt(sqrDistToAdjacent);
-            //density += (Pow2Influence(dist, smoothingRadius) * particleMass);
-            density += (CubicSplineInfluence(dist, smoothingRadius + 0.25f) * particleMass);
+            density += (CubicSplineInfluence(dist, smoothingRadius + 0.f) * particleMass);
         }
     }
     
     density = max(density, 1e-8);
-    Densities[id.x] = float2(density, nearDensity);
+    Densities[id.x] = density;
 }
 
 // kernel 4
@@ -352,8 +350,8 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
-    float density = Densities[id.x][0];
-    float pressure = (adiabaticIndex - 1) * Densities[id.x][0] * InternalEnergies[id.x];
+    float density = Densities[id.x];
+    float pressure = (adiabaticIndex - 1) * Densities[id.x] * InternalEnergies[id.x];
     float3 pressureForce = float3(0, 0, 0);
     
     float3 pos = (usePredictions)? PredictedPositions[id.x] : Positions[id.x];
@@ -387,7 +385,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             float dist = sqrt(sqrtDistToAdj);
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             
-            float adjDensity = Densities[adjIndex][0];
+            float adjDensity = Densities[adjIndex];
             float adjInternalEnergy = InternalEnergies[adjIndex];
             float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
             
@@ -396,11 +394,9 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             float sharedPressure = (pressure / (density * density)) + (adjPressure / (adjDensity * adjDensity));
             
             pressureForce += -particleMass * gradW * sharedPressure;
-            //pressureForce += dirToAdj * CubicSplineDerivativeInfluence(dist, smoothingRadius) * -(pressure / (density * density) + adjPressure / (adjDensity * adjDensity));
         }
     }
     
-    //float3 accel = pressureForce / density;
     ResultantForces[id.x] += pressureForce * pressureMultiplier;
 }
 
@@ -411,7 +407,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
-    float dens = Densities[id.x][0];
+    float dens = Densities[id.x];
     float intEnergy = InternalEnergies[id.x];
     float pressure = (adiabaticIndex - 1) * dens * intEnergy;
     
@@ -452,7 +448,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
             float dist = sqrt(sqrDistToAdj);
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             
-            float adjDensity = Densities[adjIndex][0];
+            float adjDensity = Densities[adjIndex];
             float adjInternalEnergy = InternalEnergies[adjIndex];
             float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
             
@@ -541,9 +537,9 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
             float dist = sqrt(sqrDistToAdj);
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             float intEnergy = InternalEnergies[id.x];
-            float dens = Densities[id.x][0];
+            float dens = Densities[id.x];
             float adjInternalEnergy = InternalEnergies[adjIndex];
-            float adjDensity = Densities[adjIndex][0];
+            float adjDensity = Densities[adjIndex];
             
             // compute sound speeds
             float soundSpeed = sqrt(max(adiabaticIndex * (adiabaticIndex - 1) * intEnergy, 1e-12));
@@ -559,8 +555,6 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
             float3 gradW = CubicSplineDerivativeInfluence(dist, smoothingRadius) * dirToAdj;
             float3 viscocityTerm = -0.5 * particleMass * artVisc * gradW;
             viscosityForce += viscocityTerm;
-        
-            //viscosityForce += (adjVel - vel) * (particleMass / adjacentDensity) * ViscocityLaplacianInfluence(dist, smoothingRadius);
         }
     }
     
@@ -614,7 +608,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
                 float dist = sqrt(sqrDist);
                 float w = CubicSplineInfluence(dist, smoothingRadius); // normal density kernel
 
-                float density_j = Densities[j][0];
+                float density_j = Densities[j];
 
                 xsph += (adjVel - vel) * w * (particleMass / density_j);
             }
