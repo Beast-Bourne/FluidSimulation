@@ -32,13 +32,6 @@ public class NebulaParticleSimulator : MonoBehaviour
     // spatial hash buffers and sorters
     ComputeBuffer SpatialDataBuffer;
     ComputeBuffer SpatialOffsetsBuffer;
-
-    //ComputeBuffer spatialIndices;
-    //ComputeBuffer spatialOffsets;
-    //ComputeBuffer spatialIndices2;
-    //ComputeBuffer spatialOffsets2;
-    //ComputeBuffer spatialIndices3;
-    //ComputeBuffer spatialOffsets3;
     BufferSorter sorter;
 
     [Header("Simulation Settings")]
@@ -120,17 +113,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         InternalEnergyBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         debugBuffer = ComputeHelper.CreateStructuredBuffer<float2>(10);
         ResultantForceBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
-
         SpatialDataBuffer = ComputeHelper.CreateStructuredBuffer<SpatialData>(particleCount);
         SpatialOffsetsBuffer = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
-
-        //spatialIndices = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
-        //spatialOffsets = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
-        //spatialIndices2 = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
-        //spatialOffsets2 = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
-        //spatialIndices3 = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
-        //spatialOffsets3 = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
-
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
@@ -144,16 +128,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", densityCalculationKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel, UpdatePredictionsKernel);
         ComputeHelper.SetBuffer(compute, smoothingRadii, "SmoothingRadii", densityCalculationKernel, pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel);
-
         ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel);
         ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel);
-
-        //ComputeHelper.SetBuffer(compute, spatialIndices, "SpatialIndices", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel);
-        //ComputeHelper.SetBuffer(compute, spatialOffsets, "SpatialOffsets", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel);
-        //ComputeHelper.SetBuffer(compute, spatialIndices2, "SpatialIndices2", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel);
-        //ComputeHelper.SetBuffer(compute, spatialOffsets2, "SpatialOffsets2", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel);
-        //ComputeHelper.SetBuffer(compute, spatialIndices3, "SpatialIndices3", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel);
-        //ComputeHelper.SetBuffer(compute, spatialOffsets3, "SpatialOffsets3", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();

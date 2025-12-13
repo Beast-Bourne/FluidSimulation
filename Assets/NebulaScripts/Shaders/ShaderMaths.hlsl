@@ -3,7 +3,6 @@ const float Pow2DerivativeFactor;
 const float Pow3Factor;
 const float Pow3DerivativeFactor;
 const float PolynomialPow6Factor;
-const float CubicSplineFactor;
 
 // This script contains the definitions of influence functions for the different particle properties
 // different influence functions are used because the behaviour of each property is different at distances close to 0
@@ -51,6 +50,7 @@ float PolynomialPow6Influence(float dist, float smoothingRadius)
 float CubicSplineInfluence(float dist, float smoothingRadius)
 {
     if (dist >= smoothingRadius) return 0.0f;
+    float CubicSplineFactor = 3 / (4 * smoothingRadius);
     
     float q = dist / smoothingRadius;
     
@@ -72,6 +72,7 @@ float CubicSplineInfluence(float dist, float smoothingRadius)
 float CubicSplineDerivativeInfluence(float dist, float smoothingRadius)
 {
     if (dist >= smoothingRadius) return 0.0f;
+    float CubicSplineFactor = 3 / (4 * smoothingRadius);
     
     float q = dist / smoothingRadius;
     float invSR = 1.0f / smoothingRadius;
@@ -91,6 +92,7 @@ float CubicSplineDerivativeInfluence(float dist, float smoothingRadius)
     }
 }
 
+// redundant with CubicSplineDerivativeInfluence but kept for memory of intent
 float ViscocityLaplacianInfluence(float dist, float smoothingRadius)
 {
     if (dist >= smoothingRadius) return 0.0f;
