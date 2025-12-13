@@ -13922,7 +13922,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b9b0266f38cbc4749a8abb04c0633360, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particlesPerSide: 50
+  particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
   spawnSize: 30
   VelocitySigma: 0
@@ -14046,7 +14046,6 @@ MonoBehaviour:
   fixedTimeStep: 0
   timeScale: 0.5
   damping: 0.8
-  smoothingRadius: 0.5
   pressureMultiplier: 3.5
   viscocityMultiplier: 0.01
   gasConstant: 1
@@ -14054,6 +14053,10 @@ MonoBehaviour:
   usePredictions: 1
   useXSPH: 1
   isPaused: 0
+  minFactor: 0.2
+  spatialStage1Size: 0.5
+  spatialStage2Size: 1
+  spatialStage3Size: 1.5
   gravity: 0.05
   particleMass: 0.1
   barnesHutAccuracyThreshold: 0.75

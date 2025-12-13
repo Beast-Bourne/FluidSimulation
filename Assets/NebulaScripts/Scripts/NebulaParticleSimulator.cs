@@ -214,7 +214,6 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("softeningLength", softeningLength);
         compute.SetVector("boundSize", new Vector3(octreeManager.BoundSize, octreeManager.BoundSize, octreeManager.BoundSize));
         compute.SetFloat("damping", damping);
-        compute.SetFloat("smoothingRadius", spatialStage1Size);
         compute.SetFloat("pressureMultiplier", pressureMultiplier);
         compute.SetBool("usePredictions", usePredictions);
         compute.SetBool("useXSPH", useXSPH);
