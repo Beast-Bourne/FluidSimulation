@@ -39,9 +39,21 @@ RWStructuredBuffer<float2> DebugBuffer;
 RWStructuredBuffer<uint3> SpatialIndices; // SpatialIndices[i].x is the particleIndex, .y is the hash and .z is the key
 RWStructuredBuffer<uint> SpatialOffsets; // SpatialOffsets[i] is the index of the first particle in the SpatialIndices buffer with the key matching i
 
+RWStructuredBuffer<uint3> SpatialIndices2;
+RWStructuredBuffer<uint> SpatialOffsets2;
+
+RWStructuredBuffer<uint3> SpatialIndices3;
+RWStructuredBuffer<uint> SpatialOffsets3;
+
 // octree buffers
 RWStructuredBuffer<OctreeNode> Octree;
 RWStructuredBuffer<uint> SpatialHashes;
+
+// spatial hashing parameters
+const float stage1Size;
+const float stage2Size;
+const float stage3Size;
+const float minSizeFactor;
 
 // constants used for calculations
 const uint numParticles;
@@ -272,12 +284,29 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     SpatialOffsets[id.x] = numParticles; // reset the offsets
+    SpatialOffsets2[id.x] = numParticles;
+    SpatialOffsets3[id.x] = numParticles;
     uint index = id.x;
-    int3 gridPos = GetGridPos3D((usePredictions) ? PredictedPositions[index] : Positions[index], smoothingRadius);
+    
+    // spatial hash stage 1
+    int3 gridPos = GetGridPos3D((usePredictions) ? PredictedPositions[index] : Positions[index], stage1Size);
     uint hash = HashGridPos3D(gridPos);
     uint key = KeyFromHash(hash, numParticles);
     SpatialIndices[id.x] = uint3(index, hash, key);
-
+    
+    /*
+    // spatial hash stage 2
+    int3 gridPos2 = GetGridPos3D((usePredictions) ? PredictedPositions[index] : Positions[index], stage2Size);
+    uint hash2 = HashGridPos3D(gridPos2);
+    uint key2 = KeyFromHash(hash2, numParticles);
+    SpatialIndices2[id.x] = uint3(index, hash2, key2);
+    
+    // spatial hash stage 3
+    int3 gridPos3 = GetGridPos3D((usePredictions) ? PredictedPositions[index] : Positions[index], stage3Size);
+    uint hash3 = HashGridPos3D(gridPos3);
+    uint key3 = KeyFromHash(hash3, numParticles);
+    SpatialIndices3[id.x] = uint3(index, hash3, key3);
+    */
 }
 
 // kernel 2
