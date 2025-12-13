@@ -13,6 +13,7 @@ public class BufferSorter
     readonly ComputeShader sortCompute;
     int indexBufferCount;
     int sortStageCount;
+    int numIterations;
 
     // BufferSorter constructor initializes the compute shader used for sorting
     public BufferSorter()
@@ -26,22 +27,8 @@ public class BufferSorter
     {
         indexBufferCount = indexBuffer.count;
 
-        ComputeHelper.SetBuffer(sortCompute, offsetBuffer, "Offsets", offsetKernel);
-        ComputeHelper.SetBuffer(sortCompute, indexBuffer, "Entries", offsetKernel, sortKernel);
-
-        sortCompute.SetInt("numEntries", indexBufferCount);
-        sortStageCount = (int)Log(NextPowerOfTwo(indexBufferCount), 2);
-    }
-    public void SetBuffers(ComputeBuffer indexBuffer, ComputeBuffer offsetBuffer, ComputeBuffer indexBuffer2, ComputeBuffer offsetBuffer2, ComputeBuffer indexBuffer3, ComputeBuffer offsetBuffer3)
-    {
-        indexBufferCount = indexBuffer.count;
-
-        ComputeHelper.SetBuffer(sortCompute, offsetBuffer, "Offsets", offsetKernel);
-        ComputeHelper.SetBuffer(sortCompute, indexBuffer, "Entries", offsetKernel, sortKernel);
-        ComputeHelper.SetBuffer(sortCompute, offsetBuffer2, "Offsets2", offset2Kernel);
-        ComputeHelper.SetBuffer(sortCompute, indexBuffer2, "Entries2", offset2Kernel, sort2Kernel);
-        ComputeHelper.SetBuffer(sortCompute, offsetBuffer3, "Offsets3", offset3Kernel);
-        ComputeHelper.SetBuffer(sortCompute, indexBuffer3, "Entries3", offset3Kernel, sort3Kernel);
+        ComputeHelper.SetBuffer(sortCompute, offsetBuffer, "Offsets", offsetKernel, offset2Kernel, offset3Kernel);
+        ComputeHelper.SetBuffer(sortCompute, indexBuffer, "Entries", offsetKernel, offset2Kernel, offset3Kernel, sortKernel, sort2Kernel, sort3Kernel);
 
         sortCompute.SetInt("numEntries", indexBufferCount);
         sortStageCount = (int)Log(NextPowerOfTwo(indexBufferCount), 2);

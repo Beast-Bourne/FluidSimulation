@@ -15,12 +15,27 @@ struct OctreeNode
     uint spatialStartIndex;
 };
 
+struct SpatialData
+{
+    uint index1;
+    uint hash1;
+    uint key1;
+    
+    uint index2;
+    uint hash2;
+    uint key2;
+    
+    uint index3;
+    uint hash3;
+    uint key3;
+};
+
 RWStructuredBuffer<OctreeNode> Octree;
 RWStructuredBuffer<uint> SpatialHashes;
 
 RWStructuredBuffer<float3> Positions;
-RWStructuredBuffer<uint3> SpatialIndices;
-RWStructuredBuffer<uint> SpatialOffsets;
+RWStructuredBuffer<SpatialData> SpatialIndices;
+RWStructuredBuffer<uint3> SpatialOffsets;
 
 const uint subDivisions;
 
@@ -99,11 +114,11 @@ void UpdateMasses(uint3 id : SV_DispatchThreadID)
         {
             uint hash = SpatialHashes[Octree[index].spatialStartIndex + i];
             uint key = KeyFromHash(hash, numParticles);
-            uint partIndex = SpatialOffsets[key];
+            uint partIndex = SpatialOffsets[key].x;
             
             while (partIndex < numParticles)
             {
-                uint3 indexData = SpatialIndices[partIndex];
+                uint3 indexData = uint3(SpatialIndices[partIndex].index1, SpatialIndices[partIndex].hash1, SpatialIndices[partIndex].key1);
                 partIndex++;
             
                 if (indexData[2] != key) break; // if the key is wrong then exit the loop
