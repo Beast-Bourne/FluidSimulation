@@ -139,6 +139,38 @@ void HandleCollisions(int particleIndex)
     Velocities[particleIndex] = vel;
 }
 
+uint3 GetIndexDataFromLayer(uint targetIndex, uint targetLayer)
+{
+    if (targetLayer == 1)
+    {
+        return uint3(SpatialDataBuffer[targetIndex].index1, SpatialDataBuffer[targetIndex].hash1, SpatialDataBuffer[targetIndex].key1);
+    }
+    else if (targetLayer == 2)
+    {
+        return uint3(SpatialDataBuffer[targetIndex].index2, SpatialDataBuffer[targetIndex].hash2, SpatialDataBuffer[targetIndex].key2);
+    }
+    else // targetLayer == 3
+    {
+        return uint3(SpatialDataBuffer[targetIndex].index3, SpatialDataBuffer[targetIndex].hash3, SpatialDataBuffer[targetIndex].key3);
+    }
+}
+
+uint GetSpatialOffsetFromLayer(uint key, uint targetLayer)
+{
+    if (targetLayer == 1)
+    {
+        return SpatialOffsetDataBuffer[key].x;
+    }
+    else if (targetLayer == 2)
+    {
+        return SpatialOffsetDataBuffer[key].y;
+    }
+    else // targetLayer == 3
+    {
+        return SpatialOffsetDataBuffer[key].z;
+    }
+}
+
 float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint particleIndex)
 {
     float3 gravAccel = float3(0, 0, 0);
@@ -150,11 +182,11 @@ float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint partic
     {
         uint hash = SpatialHashes[spatialIndex + i];
         uint key = KeyFromHash(hash, numParticles);
-        uint index = SpatialOffsetDataBuffer[key][0];
+        uint index = GetSpatialOffsetFromLayer(key, 1);
         
         while (index < numParticles)
         {
-            uint3 indexData = uint3(SpatialDataBuffer[index].index1, SpatialDataBuffer[index].hash1, SpatialDataBuffer[index].key1);
+            uint3 indexData = GetIndexDataFromLayer(index, 1);
             index++;
             
             if (indexData[2] != key) break; // if the key is wrong then exit the loop
@@ -277,6 +309,66 @@ float GetTargetLayerSize(float smoothRad)
            stage3Size;
 }
 
+uint GetSmoothRadFromLayer(uint particleIndex, uint layer)
+{
+    // array for tracking the shortest distances to neighbors
+    const uint targetNeighborCount = 8;
+    float Distances[targetNeighborCount];
+    for (uint i = 0; i < targetNeighborCount; i++)
+    {
+        Distances[i] = 10000000;
+    }
+    
+    float3 pos = PredictedPositions[particleIndex];
+    int3 originGridPos = GetGridPos3D(pos, (layer == 1) ? stage1Size : (layer == 2)? stage2Size : stage3Size);
+    uint neighboursFound = 0;
+    
+    for (int x = 0; x < 27; x++)
+    {
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[x]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = GetSpatialOffsetFromLayer(key, layer);
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = GetIndexDataFromLayer(index, layer);
+            index++;
+            
+            if (indexData[2] != key) break; // if the key is wrong then exit the loop
+            if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
+            
+            uint adjIndex = indexData[0];
+            if (adjIndex == particleIndex) continue; // skips self interaction
+            
+            // get the distance to the neighbour particle
+            float3 adjPos = PredictedPositions[adjIndex];
+            float3 offsetToAdj = adjPos - pos;
+            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
+            float distToAdj = sqrt(sqrDistToAdj);
+            
+            for (uint i = 0; i < targetNeighborCount; i++)
+            {
+                if (distToAdj >= Distances[i]) continue;
+                
+                // shift down the distances to make room for the new distance
+                for (uint j = targetNeighborCount - 1; j > i; j--)
+                {
+                    Distances[j] = Distances[j - 1];
+                }
+                Distances[i] = distToAdj;
+                break;
+            }
+            
+            neighboursFound++;
+        }
+    }
+    
+    // if the correct number of neighbours were found then set the smoothing radius and return true
+    if (neighboursFound < targetNeighborCount)  return 0;
+    SmoothingRadii[particleIndex] = Distances[targetNeighborCount - 1];
+    return 1;
+}
+
 // kernel 0
 // updates the predicted positions of the particles
 // NOTE: look into having the predictions reflect particles off the bounds rather than just clamping them
@@ -351,7 +443,21 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
 void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
-    SmoothingRadii[id.x] = 0.5f; // for now just set it to a constant value
+    
+    if (GetSmoothRadFromLayer(id.x, 1) == 0)
+    {
+        if (GetSmoothRadFromLayer(id.x, 2) == 0)
+        {
+            if (GetSmoothRadFromLayer(id.x, 3) == 0)
+            {
+                SmoothingRadii[id.x] = stage3Size;
+            }
+        }
+        //SmoothingRadii[id.x] = 0.5f;
+    }
+    
+    SmoothingRadii[id.x] = max(SmoothingRadii[id.x], minSizeFactor * stage1Size);
+    SmoothingRadii[id.x] = min(SmoothingRadii[id.x], stage3Size);
 }
 
 // kernel 3
@@ -391,11 +497,11 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = SpatialOffsetDataBuffer[key].x;
+        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
         
         while (index < numParticles)
         {
-            uint3 indexData = uint3(SpatialDataBuffer[index].index1, SpatialDataBuffer[index].hash1, SpatialDataBuffer[index].key1);
+            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
             index++;
             
             if (indexData[2] != key) break; // if the key is wrong then exit the loop
@@ -437,7 +543,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = SpatialOffsetDataBuffer[key].x;
+        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
         
         while (index < numParticles)
         {
@@ -500,7 +606,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = SpatialOffsetDataBuffer[key].x;
+        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
         
         while (index < numParticles)
         {
@@ -585,7 +691,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
     {
         uint hash = HashGridPos3D(gridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = SpatialOffsetDataBuffer[key].x;
+        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
         
         while (index < numParticles)
         {
@@ -664,7 +770,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
         {
             uint hash = HashGridPos3D(originGridPos + GridOffsets3D[n]);
             uint key = KeyFromHash(hash, numParticles);
-            uint index = SpatialOffsetDataBuffer[key].x;
+            uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
 
             while (index < numParticles)
             {
