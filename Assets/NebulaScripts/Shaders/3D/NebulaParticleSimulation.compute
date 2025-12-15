@@ -98,6 +98,7 @@ const bool usePredictions;
 const bool useXSPH;
 const float gasConstant;
 const float adiabaticIndex;
+const uint targetNeighborCount;
 
 const float protonMass;
 const float meanMolecularWeight;
@@ -309,66 +310,6 @@ float GetTargetLayerSize(float smoothRad)
            stage3Size;
 }
 
-uint GetSmoothRadFromLayer(uint particleIndex, uint layer)
-{
-    // array for tracking the shortest distances to neighbors
-    const uint targetNeighborCount = 8;
-    float Distances[targetNeighborCount];
-    for (uint i = 0; i < targetNeighborCount; i++)
-    {
-        Distances[i] = 10000000;
-    }
-    
-    float3 pos = PredictedPositions[particleIndex];
-    int3 originGridPos = GetGridPos3D(pos, (layer == 1) ? stage1Size : (layer == 2)? stage2Size : stage3Size);
-    uint neighboursFound = 0;
-    
-    for (int x = 0; x < 27; x++)
-    {
-        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[x]);
-        uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, layer);
-        
-        while (index < numParticles)
-        {
-            uint3 indexData = GetIndexDataFromLayer(index, layer);
-            index++;
-            
-            if (indexData[2] != key) break; // if the key is wrong then exit the loop
-            if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
-            
-            uint adjIndex = indexData[0];
-            if (adjIndex == particleIndex) continue; // skips self interaction
-            
-            // get the distance to the neighbour particle
-            float3 adjPos = PredictedPositions[adjIndex];
-            float3 offsetToAdj = adjPos - pos;
-            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
-            float distToAdj = sqrt(sqrDistToAdj);
-            
-            for (uint i = 0; i < targetNeighborCount; i++)
-            {
-                if (distToAdj >= Distances[i]) continue;
-                
-                // shift down the distances to make room for the new distance
-                for (uint j = targetNeighborCount - 1; j > i; j--)
-                {
-                    Distances[j] = Distances[j - 1];
-                }
-                Distances[i] = distToAdj;
-                break;
-            }
-            
-            neighboursFound++;
-        }
-    }
-    
-    // if the correct number of neighbours were found then set the smoothing radius and return true
-    if (neighboursFound < targetNeighborCount)  return 0;
-    SmoothingRadii[particleIndex] = Distances[targetNeighborCount - 1];
-    return 1;
-}
-
 // kernel 0
 // updates the predicted positions of the particles
 // NOTE: look into having the predictions reflect particles off the bounds rather than just clamping them
@@ -444,20 +385,47 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
-    if (GetSmoothRadFromLayer(id.x, 1) == 0)
+    float3 pos = PredictedPositions[id.x];
+    int3 originGridPos = GetGridPos3D(pos, stage3Size);
+    float sqrSmoothRad = SmoothingRadii[id.x] * SmoothingRadii[id.x];
+    uint currentNeighbourCount = 0;
+    
+    for (int x = 0; x < 27; x++)
     {
-        if (GetSmoothRadFromLayer(id.x, 2) == 0)
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[x]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = GetSpatialOffsetFromLayer(key, 3);
+        
+        while (index < numParticles)
         {
-            if (GetSmoothRadFromLayer(id.x, 3) == 0)
-            {
-                SmoothingRadii[id.x] = stage3Size;
-            }
+            uint3 indexData = GetIndexDataFromLayer(index, 3);
+            index++;
+            
+            if (indexData[2] != key) break; // if the key is wrong then exit the loop
+            if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
+            
+            uint adjIndex = indexData[0];
+            if (adjIndex == id.x) continue; // skips self interaction
+            
+            // get the distance to the neighbour particle
+            float3 adjPos = PredictedPositions[adjIndex];
+            float3 offsetToAdj = adjPos - pos;
+            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
+            
+            // skip if outside the smoothing radius
+            if (sqrDistToAdj > sqrSmoothRad) continue;
+            
+            // neighbour found so increment count
+            currentNeighbourCount++;
         }
-        //SmoothingRadii[id.x] = 0.5f;
     }
     
-    SmoothingRadii[id.x] = max(SmoothingRadii[id.x], minSizeFactor * stage1Size);
-    SmoothingRadii[id.x] = min(SmoothingRadii[id.x], stage3Size);
+    // adjust smoothing radius based on neighbour count (smoothed to prevent large jumps)
+    currentNeighbourCount = max(currentNeighbourCount, 1); // prevent division by zero
+    float newSmoothRad = SmoothingRadii[id.x] * pow((float)targetNeighborCount / (float)currentNeighbourCount, 1.0f / 3.0f);
+    newSmoothRad = clamp(newSmoothRad, stage1Size * minSizeFactor, stage3Size);
+    
+    SmoothingRadii[id.x] = lerp(SmoothingRadii[id.x], newSmoothRad, 0.1);
 }
 
 // kernel 3

@@ -51,7 +51,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float spatialStage1Size;
     public float spatialStage2Size;
     public float spatialStage3Size;
-
+    public int desiredNeighbors;
 
     [Header("Gravity Settings")]
     public float gravity;
@@ -220,6 +220,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("viscocityMultiplier", viscocityMultiplier);
         compute.SetFloat("gasConstant", gasConstant);
         compute.SetFloat("adiabaticIndex", adiabaticIndex);
+        compute.SetInt("targetNeighborCount", desiredNeighbors);
 
         compute.SetFloat("protonMass", ProtonMass);
         compute.SetFloat("meanMolecularWeight", MeanMolecularWeight);
@@ -245,17 +246,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         compute.SetFloat("CubicSplineFactor", 3 / (4*spatialStage1Size));
 
-        /*
-        float[] radii = new float[particleCount];
-        smoothingRadiiBuffer.GetData(radii);
-        for (int i = 0; i < particleCount; i++)
-        {
-            if (radii[i] < 0.5f && radii[i] > 0.1f)
-            {
-                Debug.Log("Smoothing Radius Blowup Detected: " + radii[i]);
-            }
-        }
-        */
+
         /*
         float3[] vels = new float3[particleCount];
         velocityBuffer.GetData(vels);
