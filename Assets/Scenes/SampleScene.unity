@@ -13925,7 +13925,7 @@ MonoBehaviour:
   particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
   spawnSize: 30
-  VelocitySigma: 2
+  VelocitySigma: 1.5
   randomOffsetStrength: 0.5
 --- !u!1 &1374176186
 GameObject:
@@ -14050,7 +14050,6 @@ MonoBehaviour:
   viscocityMultiplier: 0.01
   gasConstant: 1
   adiabaticIndex: 1.4
-  usePredictions: 1
   useXSPH: 1
   isPaused: 0
   minFactor: 0.75
@@ -14244,7 +14243,7 @@ MonoBehaviour:
   velocityDisplayMax: 6
   energyDisplayMin: 20
   energyDisplayMax: 40
-  displayMode: 0
+  displayMode: 2
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0
