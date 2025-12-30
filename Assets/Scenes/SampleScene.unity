@@ -13925,7 +13925,7 @@ MonoBehaviour:
   particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
   spawnSize: 30
-  VelocitySigma: 0.1
+  VelocitySigma: 2
   randomOffsetStrength: 0.5
 --- !u!1 &1374176186
 GameObject:
@@ -14244,7 +14244,7 @@ MonoBehaviour:
   velocityDisplayMax: 6
   energyDisplayMin: 20
   energyDisplayMax: 40
-  displayMode: 2
+  displayMode: 0
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

@@ -96,7 +96,6 @@ const float3 boundSize;
 const float damping;
 const float pressureMultiplier;
 const float viscocityMultiplier;
-const bool usePredictions;
 const bool useXSPH;
 const float gasConstant;
 const float adiabaticIndex;
@@ -406,7 +405,7 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
     uint index = id.x;
     
     // spatial hash stage 1
-    int3 gridPos = GetGridPos3D((usePredictions) ? PredictedPositions[index] : Positions[index], stage1Size);
+    int3 gridPos = GetGridPos3D(PredictedPositions[index], stage1Size);
     uint hash = HashGridPos3D(gridPos);
     uint key = KeyFromHash(hash, numParticles);
     SpatialDataBuffer[id.x].index1 = index;
@@ -414,7 +413,7 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
     SpatialDataBuffer[id.x].key1 = key;
     
     // spatial hash stage 2
-    int3 gridPos2 = GetGridPos3D((usePredictions) ? PredictedPositions[index] : Positions[index], stage2Size);
+    int3 gridPos2 = GetGridPos3D(PredictedPositions[index], stage2Size);
     uint hash2 = HashGridPos3D(gridPos2);
     uint key2 = KeyFromHash(hash2, numParticles);
     SpatialDataBuffer[id.x].index2 = index;
@@ -422,7 +421,7 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
     SpatialDataBuffer[id.x].key2 = key2;
     
     // spatial hash stage 3
-    int3 gridPos3 = GetGridPos3D((usePredictions) ? PredictedPositions[index] : Positions[index], stage3Size);
+    int3 gridPos3 = GetGridPos3D(PredictedPositions[index], stage3Size);
     uint hash3 = HashGridPos3D(gridPos3);
     uint key3 = KeyFromHash(hash3, numParticles);
     SpatialDataBuffer[id.x].index3 = index;
@@ -485,7 +484,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
-    float3 pos = (usePredictions)? PredictedPositions[id.x] : Positions[id.x];
+    float3 pos = PredictedPositions[id.x];
     float smoothRad = SmoothingRadii[id.x];
     
     int3 originGridPos = GetGridPos3D(pos, GetTargetLayerSize(smoothRad));
@@ -511,7 +510,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
             
             uint adjacentIndex = indexData[0];
             
-            float3 adjacentPos = (usePredictions) ? PredictedPositions[adjacentIndex] : Positions[adjacentIndex];
+            float3 adjacentPos = PredictedPositions[adjacentIndex];
             float3 offsetToAdjacent = adjacentPos - pos;
             float sqrDistToAdjacent = dot(offsetToAdjacent, offsetToAdjacent);
             
@@ -697,7 +696,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
             float pressTerm = PressureCorrections[id.x] + PressureCorrections[adjIndex];
             float velDivTerm = dot(vel - adjVel, gradW);
             float compressionTerm = 0.5 * particleMass * pressTerm * velDivTerm;
-            compTerm += compressionTerm;
+            compTerm += clamp(compressionTerm, -0.05f*intEnergy,0.05f*intEnergy);
             
             // compute artificial viscosity term only for converging particles
             float3 relVel = vel - adjVel;
