@@ -4,6 +4,7 @@
 #pragma kernel UpdateSmoothingRadii
 #pragma kernel CalculateGravity
 #pragma kernel CalculateDensities
+#pragma kernel CalculatePressureCorrection
 #pragma kernel CalculatePressureForce
 #pragma kernel CalculateEnergies
 #pragma kernel CalculateViscosities
@@ -51,10 +52,11 @@ static const int threadCount = 64;
 RWStructuredBuffer<float> SmoothingRadii;
 RWStructuredBuffer<float3> Positions;
 RWStructuredBuffer<float3> Velocities;
-RWStructuredBuffer<float> Densities;
+RWStructuredBuffer<float2> Densities;
 RWStructuredBuffer<float3> PredictedPositions;
 RWStructuredBuffer<float> InternalEnergies;
 RWStructuredBuffer<float3> ResultantForces;
+RWStructuredBuffer<float> PressureCorrections;
 
 RWStructuredBuffer<float2> DebugBuffer;
 
@@ -99,6 +101,7 @@ const bool useXSPH;
 const float gasConstant;
 const float adiabaticIndex;
 const uint targetNeighborCount;
+const bool useDynamicSmoothingRadius;
 
 const float protonMass;
 const float meanMolecularWeight;
@@ -196,7 +199,7 @@ float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint partic
             uint adjacentIndex = indexData[0];
             if (adjacentIndex == particleIndex) continue; // skips self interaction
             
-            float3 adjacentPos = (usePredictions) ? PredictedPositions[adjacentIndex] : Positions[adjacentIndex];
+            float3 adjacentPos = PredictedPositions[adjacentIndex];
             float3 offsetToAdjacent = adjacentPos - particlePos;
             float distToAdjacent = length(offsetToAdjacent);
             if (distToAdjacent <= 0) continue; // skips calculations to prevent a divide by zero error
@@ -270,7 +273,7 @@ float LambdaFunction(float temp)
 
 void ApplyCooling(int particleIndex)
 {
-    float dens = Densities[particleIndex];
+    float dens = Densities[particleIndex].x;
     float intEnergy = InternalEnergies[particleIndex];
     
     float temp = intEnergy * (adiabaticIndex - 1) * protonMass * meanMolecularWeight / boltzmannConstant;
@@ -308,6 +311,55 @@ float GetTargetLayerSize(float smoothRad)
     return (smoothRad <= stage1Size)? stage1Size :
            (smoothRad <= stage2Size)? stage2Size :
            stage3Size;
+}
+
+uint GetTargetLayer(float smoothRad)
+{
+    return (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3;
+}
+
+float GetTargetSmoothRad(float density)
+{
+    const float eta = 1.2f;
+    const float invDim = 1.0f / 3.0f;
+    return eta * pow(abs(particleMass / density), invDim);
+
+}
+
+float CalculateParticlesDensity(uint index, float smoothRad, float3 pos)
+{
+    int3 originGridPos = GetGridPos3D(pos, GetTargetLayerSize(smoothRad));
+    float density = 0;
+    float sqrRadius = smoothRad * smoothRad;
+    
+    for (int i = 0; i < 27; i++)
+    {
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+            index++;
+            
+            if (indexData[2] != key) break; // if the key is wrong then exit the loop
+            if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
+            
+            uint adjacentIndex = indexData[0];
+            
+            float3 adjacentPos = PredictedPositions[adjacentIndex];
+            float3 offsetToAdjacent = adjacentPos - pos;
+            float sqrDistToAdjacent = dot(offsetToAdjacent, offsetToAdjacent);
+            
+            if (sqrDistToAdjacent > smoothRad * smoothRad) continue; // if the particle is outside the smoothing radius then skip it
+            
+            float dist = sqrt(sqrDistToAdjacent);
+            density += (CubicSplineInfluence(dist, smoothRad) * particleMass);
+        }
+    }
+    
+    return density;
 }
 
 // kernel 0
@@ -385,47 +437,26 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
-    float3 pos = PredictedPositions[id.x];
-    int3 originGridPos = GetGridPos3D(pos, stage3Size);
-    float sqrSmoothRad = SmoothingRadii[id.x] * SmoothingRadii[id.x];
-    uint currentNeighbourCount = 0;
-    
-    for (int x = 0; x < 27; x++)
+    if (!useDynamicSmoothingRadius)
     {
-        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[x]);
-        uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, 3);
-        
-        while (index < numParticles)
-        {
-            uint3 indexData = GetIndexDataFromLayer(index, 3);
-            index++;
-            
-            if (indexData[2] != key) break; // if the key is wrong then exit the loop
-            if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
-            
-            uint adjIndex = indexData[0];
-            if (adjIndex == id.x) continue; // skips self interaction
-            
-            // get the distance to the neighbour particle
-            float3 adjPos = PredictedPositions[adjIndex];
-            float3 offsetToAdj = adjPos - pos;
-            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
-            
-            // skip if outside the smoothing radius
-            if (sqrDistToAdj > sqrSmoothRad) continue;
-            
-            // neighbour found so increment count
-            currentNeighbourCount++;
-        }
+        SmoothingRadii[id.x] = stage1Size;
+        Densities[id.x].x = CalculateParticlesDensity(id.x, stage1Size, PredictedPositions[id.x]);
+        return;
     }
     
-    // adjust smoothing radius based on neighbour count (smoothed to prevent large jumps)
-    currentNeighbourCount = max(currentNeighbourCount, 1); // prevent division by zero
-    float newSmoothRad = SmoothingRadii[id.x] * pow((float)targetNeighborCount / (float)currentNeighbourCount, 1.0f / 3.0f);
-    newSmoothRad = clamp(newSmoothRad, stage1Size * minSizeFactor, stage3Size);
+    float smoothRad = SmoothingRadii[id.x];
+    float density = 0.0f;
     
-    SmoothingRadii[id.x] = lerp(SmoothingRadii[id.x], newSmoothRad, 0.1);
+    for (int i = 0; i < 3; i++)
+    {
+        density = CalculateParticlesDensity(id.x, smoothRad, PredictedPositions[id.x]);
+        density = max(density, 1e-8);
+        float targetSmoothRad = GetTargetSmoothRad(density);
+        smoothRad = lerp(smoothRad, targetSmoothRad, 0.5f);
+    }
+    
+    SmoothingRadii[id.x] = clamp(smoothRad, stage1Size * minSizeFactor, stage3Size);
+    Densities[id.x].x = density;
 }
 
 // kernel 3
@@ -439,14 +470,14 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     
     for (int i = 1; i < 9; i++)
     {
-        gravityAccel += GetGravityAccelFromOctreeChildren(i, (usePredictions) ? PredictedPositions[id.x] : Positions[id.x], id.x);
+        gravityAccel += GetGravityAccelFromOctreeChildren(i, PredictedPositions[id.x], id.x);
     }
     
-    Velocities[id.x] += gravityAccel * deltaTime;
+    ResultantForces[id.x] += gravityAccel;
 }
 
 // kernel 4
-// calculates the densioty and near density then updates the density buffer
+// calculates the density and near density then updates the density buffer
 [numthreads(threadCount,1,1)]
 void CalculateDensities(uint3 id : SV_DispatchThreadID)
 {
@@ -457,6 +488,7 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
     
     int3 originGridPos = GetGridPos3D(pos, GetTargetLayerSize(smoothRad));
     float density = 0;
+    float densityTimeDerivative = 0;
     float sqrRadius = smoothRad * smoothRad;
     
     int partsUsed = 0;
@@ -481,18 +513,80 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
             float3 offsetToAdjacent = adjacentPos - pos;
             float sqrDistToAdjacent = dot(offsetToAdjacent, offsetToAdjacent);
             
-            if (sqrDistToAdjacent > sqrRadius) continue; // if the particle is outside the smoothing radius then skip it
+            //float avgSmoothRad = 0.5f * (smoothRad + SmoothingRadii[adjacentIndex]);
+            if (sqrDistToAdjacent > smoothRad * smoothRad) continue; // if the particle is outside the smoothing radius then skip it
             
             float dist = sqrt(sqrDistToAdjacent);
             density += (CubicSplineInfluence(dist, smoothRad) * particleMass);
+            
+            /*
+            if (adjacentIndex == id.x) continue; // skip self interaction for density time derivative)
+            
+            float3 relVel = Velocities[id.x] - Velocities[adjacentIndex];
+            float3 gradW = CubicSplineDerivativeInfluence(dist, smoothRad) * (offsetToAdjacent / dist);
+            densityTimeDerivative += particleMass * dot(relVel, gradW);
+            DebugBuffer[id.x].y = dist;
+            */
         }
     }
     
+    DebugBuffer[id.x].x = density;
     density = max(density, 1e-8);
-    Densities[id.x] = density;
+    Densities[id.x].x = density;
+    //Densities[id.x].y = densityTimeDerivative;
 }
 
 // kernel 5
+// Calculates the pressure correction for smoothing radius changes
+[numthreads(threadCount, 1, 1)]
+void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    
+    float smoothRad = SmoothingRadii[id.x];
+    float density = Densities[id.x].x;
+    float3 pos = PredictedPositions[id.x];
+    
+    int3 originGridPos = GetGridPos3D(pos, GetTargetLayerSize(smoothRad));
+    float sum_dW_dh = 0.0f;
+    
+    for (int i = 0; i < 27; i++)
+    {
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+            index++;
+            
+            if (indexData[2] != key) break;
+            if (indexData[1] != hash) continue;
+            
+            uint adjIndex = indexData[0];
+            if (adjIndex == id.x) continue;
+            
+            float3 offsetToAdj = pos - PredictedPositions[adjIndex];
+            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
+            
+            if (sqrDistToAdj > smoothRad * smoothRad) continue;
+            
+            float distToAdj = sqrt(sqrDistToAdj);
+            float W = CubicSplineInfluence(distToAdj, smoothRad);
+            float dw_dr = CubicSplineDerivativeInfluence(distToAdj, smoothRad);
+            float dw_dh = (-3.0f * W / smoothRad) + (distToAdj * dw_dr / smoothRad);
+            sum_dW_dh += particleMass * dw_dh;
+        }
+    }
+    
+    float densityTerm = -smoothRad / (3.0f * density);
+    float newCorrection = 1.0f - (densityTerm * sum_dW_dh);
+    
+    PressureCorrections[id.x] = clamp(newCorrection, 0.2f, 2.0f);
+}
+
+// kernel 6
 // calculates the pressure force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
@@ -500,11 +594,11 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     
     float smoothRad = SmoothingRadii[id.x];
-    float density = Densities[id.x];
-    float pressure = (adiabaticIndex - 1) * Densities[id.x] * InternalEnergies[id.x];
+    float density = Densities[id.x].x;
+    float pressure = (adiabaticIndex - 1) * Densities[id.x].x * InternalEnergies[id.x];
     float3 pressureForce = float3(0, 0, 0);
     
-    float3 pos = (usePredictions)? PredictedPositions[id.x] : Positions[id.x];
+    float3 pos = PredictedPositions[id.x];
     int3 originGridPos = GetGridPos3D(pos, GetTargetLayerSize(smoothRad));
     
     for (int i = 0; i < 27; i++)
@@ -515,7 +609,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
         
         while (index < numParticles)
         {
-            uint3 indexData = uint3(SpatialDataBuffer[index].index1, SpatialDataBuffer[index].hash1, SpatialDataBuffer[index].key1);
+            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
             index++;
             
             if (indexData[2] != key) break;
@@ -524,40 +618,45 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             uint adjIndex = indexData[0];
             if (adjIndex == id.x) continue;
             
-            float3 adjPos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
+            float3 adjPos = PredictedPositions[adjIndex];
             float3 offsetToAdj = pos - adjPos;
             float sqrtDistToAdj = dot(offsetToAdj, offsetToAdj);
             
             // use average smoothing radius since this is a pairwise interaction
             float avgSmoothRad = 0.5 * (smoothRad + SmoothingRadii[adjIndex]);
-            if (sqrtDistToAdj > avgSmoothRad*avgSmoothRad) continue;
+            if (sqrtDistToAdj > avgSmoothRad * avgSmoothRad) continue;
             
             float dist = sqrt(sqrtDistToAdj);
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             
-            float adjDensity = Densities[adjIndex];
+            float adjDensity = Densities[adjIndex].x;
             float adjInternalEnergy = InternalEnergies[adjIndex];
             float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
             
+            // calculate the pressure force contribution from this neighbour particle
             float influence = CubicSplineDerivativeInfluence(dist, avgSmoothRad);
             float3 gradW = influence * dirToAdj;
-            float sharedPressure = (pressure / (density * density)) + (adjPressure / (adjDensity * adjDensity));
+            //float adjInfluence = CubicSplineDerivativeInfluence(dist, SmoothingRadii[adjIndex]);
+            //float3 adjGradW = adjInfluence * dirToAdj;
             
-            pressureForce += -particleMass * gradW * sharedPressure;
+            float term1 = pressure / (density * density * PressureCorrections[id.x]);
+            float term2 = adjPressure / (adjDensity * adjDensity * PressureCorrections[adjIndex]);
+            
+            pressureForce += -particleMass * gradW * (term1 + term2);
         }
     }
     
     ResultantForces[id.x] += pressureForce * pressureMultiplier;
 }
 
-// kernel 6
+// kernel 7
 // calculates the internal energy for each particle
 [numthreads(threadCount, 1, 1)]
 void CalculateEnergies(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     
-    float dens = Densities[id.x];
+    float dens = Densities[id.x].x;
     float intEnergy = InternalEnergies[id.x];
     float pressure = (adiabaticIndex - 1) * dens * intEnergy;
     
@@ -578,7 +677,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
         
         while (index < numParticles)
         {
-            uint3 indexData = uint3(SpatialDataBuffer[index].index1, SpatialDataBuffer[index].hash1, SpatialDataBuffer[index].key1);
+            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
             index++;
             
             if (indexData[2] != key) break;
@@ -600,7 +699,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
             float dist = sqrt(sqrDistToAdj);
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             
-            float adjDensity = Densities[adjIndex];
+            float adjDensity = Densities[adjIndex].x;
             float adjInternalEnergy = InternalEnergies[adjIndex];
             float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
             
@@ -642,7 +741,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
     ApplyCooling(id.x);
 }
 
-// kernel 7
+// kernel 8
 // calculates the viscosity force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculateViscosities(uint3 id : SV_DispatchThreadID)
@@ -663,7 +762,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
         
         while (index < numParticles)
         {
-            uint3 indexData = uint3(SpatialDataBuffer[index].index1, SpatialDataBuffer[index].hash1, SpatialDataBuffer[index].key1);
+            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
             index++;
             
             if (indexData[2] != key) break;
@@ -678,7 +777,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
             
             // use average smoothing radius since this is a pairwise interaction
             float avgSmoothRad = 0.5 * (smoothRad + SmoothingRadii[adjIndex]);
-            if (sqrDistToAdj > avgSmoothRad*avgSmoothRad) continue;
+            if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
             
             float3 adjVel = Velocities[adjIndex];
             float3 relVel = vel - adjVel;
@@ -689,9 +788,9 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
             float dist = sqrt(sqrDistToAdj);
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             float intEnergy = InternalEnergies[id.x];
-            float dens = Densities[id.x];
+            float dens = Densities[id.x].x;
             float adjInternalEnergy = InternalEnergies[adjIndex];
-            float adjDensity = Densities[adjIndex];
+            float adjDensity = Densities[adjIndex].x;
             
             // compute sound speeds
             float soundSpeed = sqrt(max(adiabaticIndex * (adiabaticIndex - 1) * intEnergy, 1e-12));
@@ -713,7 +812,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
 }
 
-// kernel 8
+// kernel 9
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
@@ -742,7 +841,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
 
             while (index < numParticles)
             {
-                uint3 indexData = uint3(SpatialDataBuffer[index].index1, SpatialDataBuffer[index].hash1, SpatialDataBuffer[index].key1);
+                uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
                 index++;
 
                 if (indexData[2] != key) break;
@@ -753,16 +852,17 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
 
                 float3 adjPos = Positions[j];
                 float3 adjVel = Velocities[j];
-                float avgSmoothRad = 0.5 * (smoothRad + SmoothingRadii[j]);
 
                 float3 offset = pos - adjPos;
                 float sqrDist = dot(offset, offset);
+                
+                float avgSmoothRad = 0.5f * (smoothRad + SmoothingRadii[j]);
                 if (sqrDist > avgSmoothRad * avgSmoothRad) continue;
 
                 float dist = sqrt(sqrDist);
                 float w = CubicSplineInfluence(dist, avgSmoothRad); // normal density kernel
 
-                float density_j = Densities[j];
+                float density_j = Densities[j].x;
 
                 xsph += (adjVel - vel) * w * (particleMass / density_j);
             }

@@ -14046,18 +14046,20 @@ MonoBehaviour:
   fixedTimeStep: 0
   timeScale: 0.5
   damping: 0.8
-  pressureMultiplier: 3.5
+  pressureMultiplier: 0.25
   viscocityMultiplier: 0.01
   gasConstant: 1
   adiabaticIndex: 1.4
   usePredictions: 1
   useXSPH: 1
   isPaused: 0
-  minFactor: 0.2
+  minFactor: 0.75
   spatialStage1Size: 0.5
-  spatialStage2Size: 1
-  spatialStage3Size: 1.5
-  gravity: 0.05
+  spatialStage2Size: 0.75
+  spatialStage3Size: 1
+  desiredNeighbors: 32
+  useDynamicSmoothingRadius: 1
+  gravity: 0.7
   particleMass: 0.1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01
@@ -14236,13 +14238,13 @@ MonoBehaviour:
     m_NumColorKeys: 4
     m_NumAlphaKeys: 2
   gradientResolution: 50
-  densityDisplayMin: 0.05
-  densityDisplayMax: 0.5
+  densityDisplayMin: 0
+  densityDisplayMax: 0.7
   velocityDisplayMin: 0
   velocityDisplayMax: 6
-  energyDisplayMin: 25
-  energyDisplayMax: 45
-  displayMode: 0
+  energyDisplayMin: 29
+  energyDisplayMax: 31
+  displayMode: 2
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0
