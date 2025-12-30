@@ -122,19 +122,19 @@ public class NebulaParticleSimulator : MonoBehaviour
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", UpdatePredictionsKernel, gridHashKernel, updatePositionKernel, densityCalculationKernel, internalEnergyKernel);
+        ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", UpdatePredictionsKernel, gridHashKernel, updatePositionKernel, densityCalculationKernel);
         ComputeHelper.SetBuffer(compute, predictedPositionBuffer, "PredictedPositions", updatePositionKernel, gridHashKernel, densityCalculationKernel, pressureForceKernel, UpdatePredictionsKernel, viscosityKernel, gravityKernel, internalEnergyKernel, smoothingRadiusKernel, pressureCorrectionKernel);
         ComputeHelper.SetBuffer(compute, velocityBuffer, "Velocities", UpdatePredictionsKernel, updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, densityCalculationKernel);
         ComputeHelper.SetBuffer(compute, densityBuffer, "Densities", densityCalculationKernel, pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, pressureCorrectionKernel, smoothingRadiusKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
-        ComputeHelper.SetBuffer(compute, InternalEnergyBuffer, "InternalEnergies", pressureForceKernel, internalEnergyKernel, viscosityKernel);
-        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", smoothingRadiusKernel, densityCalculationKernel);
+        ComputeHelper.SetBuffer(compute, InternalEnergyBuffer, "InternalEnergies", pressureForceKernel, internalEnergyKernel, viscosityKernel, pressureCorrectionKernel);
+        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", smoothingRadiusKernel, pressureCorrectionKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel);
         ComputeHelper.SetBuffer(compute, smoothingRadiiBuffer, "SmoothingRadii", densityCalculationKernel, pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel);
         ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel);
         ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, densityCalculationKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel);
-        ComputeHelper.SetBuffer(compute, pressureCorrectionBuffer, "PressureCorrections", pressureCorrectionKernel, pressureForceKernel);
+        ComputeHelper.SetBuffer(compute, pressureCorrectionBuffer, "PressureCorrections", pressureCorrectionKernel, pressureForceKernel, internalEnergyKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -254,7 +254,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("CubicSplineFactor", 3 / (4*spatialStage1Size));
 
         //ShowDebugData();
-        DebugSmoothingRadii();
+        //DebugSmoothingRadii();
     }
 
     // Sets the initial buffer data for the simulation
@@ -314,13 +314,31 @@ public class NebulaParticleSimulator : MonoBehaviour
     {
         float[] radii = new float[particleCount];
         smoothingRadiiBuffer.GetData(radii);
-        Debug.Log("Smoothing Radius: " + radii[200]);
+
+        Dictionary<float, int> radiusCounts = new Dictionary<float, int>();
+
+        
+        for (int i = 0; i < radii.Length; i++)
+        {
+            float radius = radii[i];
+            if (radiusCounts.ContainsKey(radius))
+            {
+                radiusCounts[radius]++;
+            }
+            else
+            {
+                radiusCounts[radius] = 1;
+            }
+        }
+
+        int count = radiusCounts.ContainsKey(1.0f) ? radiusCounts[1.0f] : 0;
+        Debug.Log($"Radius: {1.0f}, Count: {count}");
     }
     void ShowDebugData()
     {
         float2[] debugData = new float2[particleCount];
         debugBuffer.GetData(debugData);
-        Debug.Log("dh_dt: " + debugData[200].x + "  newRad: " + debugData[200].y);
+        Debug.Log("Omega: " + debugData[200].x + "  PressureTerm: " + debugData[200].y);
     }
 
     private void OnApplicationQuit()

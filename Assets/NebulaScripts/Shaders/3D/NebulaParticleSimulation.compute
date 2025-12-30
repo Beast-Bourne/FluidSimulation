@@ -455,6 +455,7 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
         smoothRad = lerp(smoothRad, targetSmoothRad, 0.5f);
     }
     
+    smoothRad = lerp(SmoothingRadii[id.x], smoothRad, 0.005f);
     SmoothingRadii[id.x] = clamp(smoothRad, stage1Size * minSizeFactor, stage3Size);
     Densities[id.x].x = density;
 }
@@ -476,6 +477,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += gravityAccel;
 }
 
+// NOTE: Entire kernel is redundant now as density is calculated in kernel 2 (kernel 4 is not used in the simulation)
 // kernel 4
 // calculates the density and near density then updates the density buffer
 [numthreads(threadCount,1,1)]
@@ -518,22 +520,10 @@ void CalculateDensities(uint3 id : SV_DispatchThreadID)
             
             float dist = sqrt(sqrDistToAdjacent);
             density += (CubicSplineInfluence(dist, smoothRad) * particleMass);
-            
-            /*
-            if (adjacentIndex == id.x) continue; // skip self interaction for density time derivative)
-            
-            float3 relVel = Velocities[id.x] - Velocities[adjacentIndex];
-            float3 gradW = CubicSplineDerivativeInfluence(dist, smoothRad) * (offsetToAdjacent / dist);
-            densityTimeDerivative += particleMass * dot(relVel, gradW);
-            DebugBuffer[id.x].y = dist;
-            */
         }
     }
     
-    DebugBuffer[id.x].x = density;
-    density = max(density, 1e-8);
-    Densities[id.x].x = density;
-    //Densities[id.x].y = densityTimeDerivative;
+    Densities[id.x].x = max(density, 1e-8);
 }
 
 // kernel 5
@@ -582,8 +572,14 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
     
     float densityTerm = -smoothRad / (3.0f * density);
     float newCorrection = 1.0f - (densityTerm * sum_dW_dh);
+    newCorrection = clamp(newCorrection, 0.2f, 2.0f);
     
-    PressureCorrections[id.x] = clamp(newCorrection, 0.2f, 2.0f);
+    float pressure = (adiabaticIndex - 1) * Densities[id.x].x * InternalEnergies[id.x];
+    float pressureTerm = (pressure / (density * density * newCorrection));
+    
+    PressureCorrections[id.x] = pressureTerm;
+    
+    DebugBuffer[id.x] = float2(newCorrection, pressureTerm);
 }
 
 // kernel 6
@@ -594,8 +590,6 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     
     float smoothRad = SmoothingRadii[id.x];
-    float density = Densities[id.x].x;
-    float pressure = (adiabaticIndex - 1) * Densities[id.x].x * InternalEnergies[id.x];
     float3 pressureForce = float3(0, 0, 0);
     
     float3 pos = PredictedPositions[id.x];
@@ -629,18 +623,10 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             float dist = sqrt(sqrtDistToAdj);
             float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
             
-            float adjDensity = Densities[adjIndex].x;
-            float adjInternalEnergy = InternalEnergies[adjIndex];
-            float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
-            
             // calculate the pressure force contribution from this neighbour particle
-            float influence = CubicSplineDerivativeInfluence(dist, avgSmoothRad);
-            float3 gradW = influence * dirToAdj;
-            //float adjInfluence = CubicSplineDerivativeInfluence(dist, SmoothingRadii[adjIndex]);
-            //float3 adjGradW = adjInfluence * dirToAdj;
-            
-            float term1 = pressure / (density * density * PressureCorrections[id.x]);
-            float term2 = adjPressure / (adjDensity * adjDensity * PressureCorrections[adjIndex]);
+            float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
+            float term1 = PressureCorrections[id.x];
+            float term2 = PressureCorrections[adjIndex];
             
             pressureForce += -particleMass * gradW * (term1 + term2);
         }
@@ -658,9 +644,8 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
     
     float dens = Densities[id.x].x;
     float intEnergy = InternalEnergies[id.x];
-    float pressure = (adiabaticIndex - 1) * dens * intEnergy;
     
-    float3 pos = (usePredictions) ? PredictedPositions[id.x] : Positions[id.x];
+    float3 pos = PredictedPositions[id.x];
     float3 vel = Velocities[id.x];
     float smoothRad = SmoothingRadii[id.x];
     int3 originGridPos = GetGridPos3D(pos, GetTargetLayerSize(smoothRad));
@@ -686,7 +671,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
             uint adjIndex = indexData[0];
             if (adjIndex == id.x) continue;
             
-            float3 adjPos = (usePredictions) ? PredictedPositions[adjIndex] : Positions[adjIndex];
+            float3 adjPos = PredictedPositions[adjIndex];
             float3 adjVel = Velocities[adjIndex];
             
             float3 offsetToAdj = pos - adjPos;
@@ -701,17 +686,15 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
             
             float adjDensity = Densities[adjIndex].x;
             float adjInternalEnergy = InternalEnergies[adjIndex];
-            float adjPressure = (adiabaticIndex - 1) * adjDensity * adjInternalEnergy;
             
             float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
             
             // conduction term
             float condMassFactor = (particleMass * conductionCoefficient) / (dens * adjDensity);
-            float offsetDotGradW = dot(offsetToAdj, gradW) / (sqrDistToAdj + 0.0001); // check if this is redundant?
             condTerm += 0.5 * condMassFactor * (adjInternalEnergy - intEnergy) * CubicSplineInfluence(dist, avgSmoothRad);
             
             // compute compression term
-            float pressTerm = (pressure / (dens * dens)) + (adjPressure / (adjDensity * adjDensity));
+            float pressTerm = PressureCorrections[id.x] + PressureCorrections[adjIndex];
             float velDivTerm = dot(vel - adjVel, gradW);
             float compressionTerm = 0.5 * particleMass * pressTerm * velDivTerm;
             compTerm += compressionTerm;
