@@ -78,6 +78,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float TimeBetweenSamples;
     public float TotalSampleTime;
     public string logFileName;
+    private bool canWriteLog = false;
 
     // kernel IDs for the compute shader
     const int UpdatePredictionsKernel = 0;
@@ -166,6 +167,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         else if (enableDataCollection && totalTimeElapsed >= TotalSampleTime)
         {
             enableDataCollection = false;
+            canWriteLog = true;
             Debug.Log("Finished Data Collection");
         }
     }
@@ -340,7 +342,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
     private void OnApplicationQuit()
     {
-        if (!enableDataCollection) return;
+        if (!canWriteLog) return;
 
         string path = Path.Combine("C:/My_Storage/Python_Stuff/FluidSimDataLogs/TextData", logFileName);
         if (File.Exists(path)) { Debug.Log("Log attempted for file name that already exists"); return; }
