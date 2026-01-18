@@ -88,7 +88,7 @@ public class OctreeManager : MonoBehaviour
         }
     }
 
-    public void SetBuffers(ComputeBuffer OctreeBuffer, ComputeBuffer HashBuffer, float smoothingRadius, ComputeBuffer indexBuffer, ComputeBuffer offsetBuffer, int numParticles, ComputeBuffer posBuffer, float particleMass)
+    public void SetBuffers(ComputeBuffer OctreeBuffer, ComputeBuffer HashBuffer, float smoothingRadius, ComputeBuffer indexBuffer, ComputeBuffer offsetBuffer, int numParticles, ComputeBuffer particleBuffer, float particleMass)
     {
         BuildOctree(smoothingRadius * LeafNodeSizeMuliplier);
 
@@ -100,7 +100,7 @@ public class OctreeManager : MonoBehaviour
         ComputeHelper.SetBuffer(SpatialCompute, HashBuffer, "SpatialHashes", 0, 1);
         ComputeHelper.SetBuffer(SpatialCompute, indexBuffer, "SpatialIndices", 1);
         ComputeHelper.SetBuffer(SpatialCompute, offsetBuffer, "SpatialOffsets", 1);
-        ComputeHelper.SetBuffer(SpatialCompute, posBuffer, "Positions", 1);
+        ComputeHelper.SetBuffer(SpatialCompute, particleBuffer, "Particles", 1);
 
         SpatialCompute.SetInt("subDivisions", (int)LeafNodeSizeMuliplier);
         SpatialCompute.SetInt("bottomLayerStartIndex", ((int)IntPow(8, NumOfLayers-1) - 1) / 7);

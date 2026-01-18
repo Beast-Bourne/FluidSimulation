@@ -19,10 +19,19 @@ Shader "Hidden/Particle3D"
 
             #include "UnityCG.cginc"
 
-            StructuredBuffer<float3> positions;
-            StructuredBuffer<float3> velocities;
-            StructuredBuffer<float2> densities;
-            StructuredBuffer<float> energies;
+            struct ParticleData
+            {
+                float3 position;
+                float3 predictedPos;
+                float3 velocity;
+                float density;
+                float smoothingRadius;
+                float internelEnergy;
+                float pressureCorrection;
+                float balsaraFactor;
+            };
+
+            StructuredBuffer<ParticleData> particles;
 
             Texture2D<float4> ColourMap;
             SamplerState linear_clamp_sampler;
@@ -49,24 +58,24 @@ Shader "Hidden/Particle3D"
 
             v2f vert (appdata_full v, uint instanceID : SV_InstanceID)
             {
-                float density = densities[instanceID].x;
+                float density = particles[instanceID].density;
                 float densityT = saturate((density - densityMin) / (densityMax - densityMin));
                 float colT = densityT;
 
                 if (displayType == 1)
                 {
-                    float velocity = length(velocities[instanceID]);
+                    float velocity = length(particles[instanceID].velocity);
                     float velocityT = saturate((velocity - velocityMin) / (velocityMax - velocityMin));
                     colT = velocityT;
                 }
                 else if (displayType == 2)
                 {
-                    float energy = energies[instanceID];
+                    float energy = particles[instanceID].internelEnergy;
                     float energyT = saturate((energy - energyMin) / (energyMax - energyMin));
                     colT = energyT;
                 }
 
-                float3 centreWorld = positions[instanceID];
+                float3 centreWorld = particles[instanceID].position;
                 float3 worldVertPos = centreWorld + mul(unity_ObjectToWorld, v.vertex * scale);
                 float3 objectVertPos = mul(unity_WorldToObject, float4(worldVertPos.xyz, 1));
 

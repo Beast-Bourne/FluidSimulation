@@ -43,12 +43,9 @@ public class NebulaParticleDisplay : MonoBehaviour
     public void Init(NebulaParticleSimulator sim)
     {
         material = new Material(shader);
-        material.SetBuffer("positions", sim.positionBuffer);
-        material.SetBuffer("velocities", sim.velocityBuffer);
-        material.SetBuffer("densities", sim.densityBuffer);
-        material.SetBuffer("energies", sim.InternalEnergyBuffer);
+        material.SetBuffer("particles", sim.particleBuffer);
 
-        argsBuffer = ComputeHelper.CreateArgsBuffer(mesh, sim.positionBuffer.count);
+        argsBuffer = ComputeHelper.CreateArgsBuffer(mesh, sim.particleBuffer.count);
         bounds = new Bounds(Vector3.zero, Vector3.one * 10000);
     }
 

@@ -30,10 +30,22 @@ struct SpatialData
     uint key3;
 };
 
+struct ParticleData
+{
+    float3 position;
+    float3 predictedPos;
+    float3 velocity;
+    float density;
+    float smoothingRadius;
+    float internelEnergy;
+    float pressureCorrection;
+    float balsaraFactor;
+};
+
 RWStructuredBuffer<OctreeNode> Octree;
 RWStructuredBuffer<uint> SpatialHashes;
 
-RWStructuredBuffer<float3> Positions;
+RWStructuredBuffer<ParticleData> Particles;
 RWStructuredBuffer<SpatialData> SpatialIndices;
 RWStructuredBuffer<uint3> SpatialOffsets;
 
@@ -124,7 +136,7 @@ void UpdateMasses(uint3 id : SV_DispatchThreadID)
                 if (indexData[2] != key) break; // if the key is wrong then exit the loop
                 if (indexData[1] != hash) continue; // if the hash is wrong then move to the next index
                 
-                centreOfMass = ((particleMass * Positions[indexData[0]]) + (totalMass * centreOfMass)) / (totalMass + particleMass);
+                centreOfMass = ((particleMass * Particles[indexData[0]].position) + (totalMass * centreOfMass)) / (totalMass + particleMass);
                 totalMass += particleMass;
             }
         }

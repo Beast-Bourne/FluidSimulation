@@ -1,11 +1,8 @@
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
-using UnityEngine.UIElements;
 
 public class NebulaParticleSimulator : MonoBehaviour
 {
@@ -18,18 +15,11 @@ public class NebulaParticleSimulator : MonoBehaviour
     public ComputeShader compute;
 
     // buffers for the compute shader
-    public ComputeBuffer positionBuffer { get; private set; }
-    public ComputeBuffer velocityBuffer { get; private set; }
-    public ComputeBuffer densityBuffer { get; private set; }
-    public ComputeBuffer InternalEnergyBuffer { get; private set; }
+    public ComputeBuffer particleBuffer { get; private set; }
     ComputeBuffer ResultantForceBuffer;
-    ComputeBuffer predictedPositionBuffer;
     ComputeBuffer OctreeBuffer;
     ComputeBuffer SpatialHashes;
     ComputeBuffer debugBuffer;
-    ComputeBuffer smoothingRadiiBuffer;
-    ComputeBuffer pressureCorrectionBuffer;
-    ComputeBuffer velocityDerivativesBuffer;
 
     // spatial hash buffers and sorters
     ComputeBuffer SpatialDataBuffer;
@@ -106,44 +96,29 @@ public class NebulaParticleSimulator : MonoBehaviour
     {
         spawnData = spawner.GetSpawnData(adiabaticIndex, InitialTemperature, BoltzmannConstant, ProtonMass, MeanMolecularWeight);
         particleCount = spawnData.positions.Length;
-
-        smoothingRadiiBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
-        positionBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
-        predictedPositionBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
-        velocityBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
-        densityBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
+        particleBuffer = ComputeHelper.CreateStructuredBuffer<ParticleData>(particleCount);
         OctreeBuffer = ComputeHelper.CreateStructuredBuffer<OctreeNode>(octreeManager.NumOfNodes);
-        SpatialHashes = ComputeHelper.CreateStructuredBuffer<uint>(octreeManager.NumBottomLayerNodes * (int)octreeManager.NumOfHashesPerLeafNode); // need to make this work with the octree sizes
-        InternalEnergyBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
+        SpatialHashes = ComputeHelper.CreateStructuredBuffer<uint>(octreeManager.NumBottomLayerNodes * (int)octreeManager.NumOfHashesPerLeafNode);
         debugBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
         ResultantForceBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
-        pressureCorrectionBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         SpatialDataBuffer = ComputeHelper.CreateStructuredBuffer<SpatialData>(particleCount);
         SpatialOffsetsBuffer = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
-        velocityDerivativesBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", UpdatePredictionsKernel, updatePositionKernel);
-        ComputeHelper.SetBuffer(compute, predictedPositionBuffer, "PredictedPositions", updatePositionKernel, gridHashKernel, pressureForceKernel, UpdatePredictionsKernel, viscosityKernel, gravityKernel, internalEnergyKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
-        ComputeHelper.SetBuffer(compute, velocityBuffer, "Velocities", UpdatePredictionsKernel, updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, velocityDerivativesKernel);
-        ComputeHelper.SetBuffer(compute, densityBuffer, "Densities", pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, pressureCorrectionKernel, smoothingRadiusKernel, velocityDerivativesKernel);
+        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
-        ComputeHelper.SetBuffer(compute, InternalEnergyBuffer, "InternalEnergies", pressureForceKernel, internalEnergyKernel, viscosityKernel, pressureCorrectionKernel);
         ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", smoothingRadiusKernel, pressureCorrectionKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel);
-        ComputeHelper.SetBuffer(compute, smoothingRadiiBuffer, "SmoothingRadii", pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
         ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
         ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
-        ComputeHelper.SetBuffer(compute, pressureCorrectionBuffer, "PressureCorrections", pressureCorrectionKernel, pressureForceKernel, internalEnergyKernel);
-        //ComputeHelper.SetBuffer(compute, velocityDerivativesBuffer, "BalsaraFactors", velocityDerivativesKernel, viscosityKernel, internalEnergyKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
         sorter.SetBuffers(SpatialDataBuffer, SpatialOffsetsBuffer);
 
-        octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, spatialStage1Size, SpatialDataBuffer, SpatialOffsetsBuffer, particleCount, positionBuffer, particleMass);
+        octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, spatialStage1Size, SpatialDataBuffer, SpatialOffsetsBuffer, particleCount, particleBuffer, particleMass);
 
         display.Init(this);
     }
@@ -264,19 +239,27 @@ public class NebulaParticleSimulator : MonoBehaviour
     void SetInitialBufferData(NebulaParticleSpawner.ParticleSpawnData spawnData)
     {
         float3[] allPoints = new float3[spawnData.positions.Length]; // This prevents the modification of the inital spawn data
-        float[] allSmooths = new float[spawnData.positions.Length];
         System.Array.Copy(spawnData.positions, allPoints, spawnData.positions.Length);
 
-        for (int i = 0; i < allSmooths.Length; i++)
+        ParticleData[] allParticles = new ParticleData[particleCount];
+
+        for (int i = 0; i < allParticles.Length; i++)
         {
-            allSmooths[i] = spatialStage1Size;
+            ParticleData particle = new ParticleData
+            {
+                position = spawnData.positions[i],
+                predictedPos = spawnData.positions[i],
+                velocity = spawnData.velocities[i],
+                internelEnergy = spawnData.energies[i],
+                density = 0.0f,
+                smoothingRadius = spatialStage1Size,
+                pressureCorrection = 0.0f,
+                balsaraFactor = 1.0f
+            };
+            allParticles[i] = particle;
         }
 
-        positionBuffer.SetData(allPoints);
-        predictedPositionBuffer.SetData(allPoints);
-        velocityBuffer.SetData(spawnData.velocities);
-        InternalEnergyBuffer.SetData(spawnData.energies);
-        smoothingRadiiBuffer.SetData(allSmooths);
+        particleBuffer.SetData(allParticles);
     }
 
     // Handles user input to pause the simulation, reset it, or run a single frame
@@ -313,30 +296,6 @@ public class NebulaParticleSimulator : MonoBehaviour
         }
     }
 
-    void DebugSmoothingRadii()
-    {
-        float[] radii = new float[particleCount];
-        smoothingRadiiBuffer.GetData(radii);
-
-        Dictionary<float, int> radiusCounts = new Dictionary<float, int>();
-
-        
-        for (int i = 0; i < radii.Length; i++)
-        {
-            float radius = radii[i];
-            if (radiusCounts.ContainsKey(radius))
-            {
-                radiusCounts[radius]++;
-            }
-            else
-            {
-                radiusCounts[radius] = 1;
-            }
-        }
-
-        int count = radiusCounts.ContainsKey(1.0f) ? radiusCounts[1.0f] : 0;
-        Debug.Log($"Radius: {1.0f}, Count: {count}");
-    }
     void ShowDebugData()
     {
         float2[] debugData = new float2[particleCount];
@@ -357,9 +316,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     // Clears the memory of all the buffers from the compute shader when the program is closed
     private void OnDestroy()
     {
-        ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer,
-            OctreeBuffer, SpatialHashes, InternalEnergyBuffer, debugBuffer, pressureCorrectionBuffer, 
-            ResultantForceBuffer, smoothingRadiiBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, velocityDerivativesBuffer);
+        ComputeHelper.Release(particleBuffer, OctreeBuffer, SpatialHashes, debugBuffer, ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer);
     }
 }
 
@@ -376,4 +333,16 @@ public struct SpatialData
     uint index3;
     uint hash3;
     uint key3;
+}
+
+public struct  ParticleData
+{
+    public Vector3 position;
+    public Vector3 predictedPos;
+    public Vector3 velocity;
+    public float density;
+    public float smoothingRadius;
+    public float internelEnergy;
+    public float pressureCorrection;
+    public float balsaraFactor;
 }
