@@ -2,6 +2,7 @@
 #pragma kernel UpdatePredictions
 #pragma kernel UpdateGridHash
 #pragma kernel UpdateSmoothingRadii
+#pragma kernel VelocityDerivatives
 #pragma kernel CalculateGravity
 #pragma kernel CalculatePressureCorrection
 #pragma kernel CalculatePressureForce
@@ -12,6 +13,18 @@
 // Includes
 #include "../GridHelper.hlsl"
 #include "../ShaderMaths.hlsl"
+
+struct ParticleData
+{
+    float3 position;
+    float3 predictedPos;
+    float3 velocity;
+    float density;
+    float smoothingRadius;
+    float internelEnergy;
+    float pressureCorrection;
+    float balsaraFactor;
+};
 
 // NOTE: should optimise this later (need padding for alignment)
 // compress CentreOfMass to float4 where w is mass (float 3 causes alignment issues, wasting bandwidth)
@@ -49,6 +62,8 @@ struct SpatialData
 static const int threadCount = 64;
 
 // property buffers
+//RWStructuredBuffer<ParticleData> ParticleBuffer;
+
 RWStructuredBuffer<float> SmoothingRadii;
 RWStructuredBuffer<float3> Positions;
 RWStructuredBuffer<float3> Velocities;
@@ -57,6 +72,7 @@ RWStructuredBuffer<float3> PredictedPositions;
 RWStructuredBuffer<float> InternalEnergies;
 RWStructuredBuffer<float3> ResultantForces;
 RWStructuredBuffer<float> PressureCorrections;
+RWStructuredBuffer<float> BalsaraFactors;
 
 RWStructuredBuffer<float2> DebugBuffer;
 
@@ -458,6 +474,61 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 3
+// computes the velocity derivatives. (for balsara switch)
+[numthreads(threadCount, 1, 1)]
+void VelocityDerivatives(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    
+    float smoothRad = SmoothingRadii[id.x];
+    float3 vel = Velocities[id.x];
+    float3 pos = PredictedPositions[id.x];
+    int3 originGridPos = GetGridPos3D(pos, GetTargetLayerSize(smoothRad));
+    
+    float divV = 0.0f;
+    float3 curlV = 0.0f;
+    
+    for (int i = 0; i < 27; i++)
+    {
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+            index++;
+            
+            if (indexData[2] != key) break;
+            if (indexData[1] != hash) continue;
+            
+            uint adjIndex = indexData[0];
+            if (adjIndex == id.x) continue;
+            
+            float3 offsetToAdj = pos - PredictedPositions[adjIndex];
+            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
+            
+            float avgSmoothRad = 0.5 * (smoothRad + SmoothingRadii[adjIndex]);
+            if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
+            
+            float3 adjVel = Velocities[adjIndex];
+            float3 relVel = adjVel - vel;
+            float gradW = CubicSplineInfluence(sqrt(sqrDistToAdj), avgSmoothRad);
+            float m_dens = particleMass / Densities[adjIndex];
+            
+            divV += m_dens * dot(relVel, gradW);
+            curlV += m_dens * cross(relVel, gradW); // just need one component for magnitude)
+        }
+        
+        float div = abs(divV);
+        float curlMag = length(curlV);
+        const float eps = 1e-4;
+        
+        BalsaraFactors[id.x] = div / (div + curlMag + eps);
+    }
+}
+
+// kernel 4
 // calculates the gravity force between the particles
 [numthreads(threadCount,1,1)]
 void CalculateGravity(uint3 id : SV_DispatchThreadID)
@@ -474,7 +545,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += gravityAccel;
 }
 
-// kernel 4
+// kernel 5
 // Calculates the pressure correction for smoothing radius changes
 [numthreads(threadCount, 1, 1)]
 void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
@@ -530,7 +601,7 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
     DebugBuffer[id.x] = float2(newCorrection, pressureTerm);
 }
 
-// kernel 5
+// kernel 6
 // calculates the pressure force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
@@ -583,7 +654,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += pressureForce * pressureMultiplier;
 }
 
-// kernel 6
+// kernel 7
 // calculates the internal energy for each particle
 [numthreads(threadCount, 1, 1)]
 void CalculateEnergies(uint3 id : SV_DispatchThreadID)
@@ -659,7 +730,8 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
                 float avgDensity = 0.5 * (dens + adjDensity);
                 float massFactor = (avgSmoothRad * relVelAlongOffset) / (sqrDistToAdj + (viscEpsilon * avgSmoothRad * avgSmoothRad));
 
-                float artVisc = (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
+                float avgBalsara = 1.0f; // = 0.5f * (BalsaraFactors[id.x] + BalsaraFactors[adjIndex]);
+                float artVisc = avgBalsara * (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
                 float viscocityTerm = 0.5 * particleMass * artVisc * velDivTerm;
                 viscTerm += viscocityTerm;
             }
@@ -672,7 +744,7 @@ void CalculateEnergies(uint3 id : SV_DispatchThreadID)
     ApplyCooling(id.x);
 }
 
-// kernel 7
+// kernel 8
 // calculates the viscosity force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculateViscosities(uint3 id : SV_DispatchThreadID)
@@ -733,7 +805,8 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
             float massFactor = (avgSmoothRad * relVelAlongOffset) / (sqrDistToAdj + (viscEpsilon * avgSmoothRad * avgSmoothRad));
 
             // compute artificial viscosity term
-            float artVisc = (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
+            float avgBalsara = 1.0f; // = 0.5f * (BalsaraFactors[id.x] + BalsaraFactors[adjIndex]);
+            float artVisc = avgBalsara * (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
             float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
             float3 viscocityTerm = -0.5 * particleMass * artVisc * gradW;
             viscosityForce += viscocityTerm;
@@ -743,7 +816,7 @@ void CalculateViscosities(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
 }
 
-// kernel 8
+// kernel 9
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
@@ -757,7 +830,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     if (useXSPH)
     {
         float3 xsph = 0;
-        float eps = 0.05; // try 0.03..0.1
+        float eps = 0.03; // try 0.03..0.1
 
         float3 pos = Positions[id.x];
         float3 vel = Velocities[id.x];

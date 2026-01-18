@@ -29,6 +29,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     ComputeBuffer debugBuffer;
     ComputeBuffer smoothingRadiiBuffer;
     ComputeBuffer pressureCorrectionBuffer;
+    ComputeBuffer velocityDerivativesBuffer;
 
     // spatial hash buffers and sorters
     ComputeBuffer SpatialDataBuffer;
@@ -84,12 +85,13 @@ public class NebulaParticleSimulator : MonoBehaviour
     const int UpdatePredictionsKernel = 0;
     const int gridHashKernel = 1;
     const int smoothingRadiusKernel = 2;
-    const int gravityKernel = 3;
-    const int pressureCorrectionKernel = 4;
-    const int pressureForceKernel = 5;
-    const int internalEnergyKernel = 6;
-    const int viscosityKernel = 7;
-    const int updatePositionKernel = 8;
+    const int velocityDerivativesKernel = 3;
+    const int gravityKernel = 4;
+    const int pressureCorrectionKernel = 5;
+    const int pressureForceKernel = 6;
+    const int internalEnergyKernel = 7;
+    const int viscosityKernel = 8;
+    const int updatePositionKernel = 9;
 
     // other
     bool isPausedNextFrame;
@@ -118,22 +120,24 @@ public class NebulaParticleSimulator : MonoBehaviour
         pressureCorrectionBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         SpatialDataBuffer = ComputeHelper.CreateStructuredBuffer<SpatialData>(particleCount);
         SpatialOffsetsBuffer = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
+        velocityDerivativesBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
         ComputeHelper.SetBuffer(compute, positionBuffer, "Positions", UpdatePredictionsKernel, updatePositionKernel);
-        ComputeHelper.SetBuffer(compute, predictedPositionBuffer, "PredictedPositions", updatePositionKernel, gridHashKernel, pressureForceKernel, UpdatePredictionsKernel, viscosityKernel, gravityKernel, internalEnergyKernel, smoothingRadiusKernel, pressureCorrectionKernel);
-        ComputeHelper.SetBuffer(compute, velocityBuffer, "Velocities", UpdatePredictionsKernel, updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel);
-        ComputeHelper.SetBuffer(compute, densityBuffer, "Densities", pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, pressureCorrectionKernel, smoothingRadiusKernel);
+        ComputeHelper.SetBuffer(compute, predictedPositionBuffer, "PredictedPositions", updatePositionKernel, gridHashKernel, pressureForceKernel, UpdatePredictionsKernel, viscosityKernel, gravityKernel, internalEnergyKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
+        ComputeHelper.SetBuffer(compute, velocityBuffer, "Velocities", UpdatePredictionsKernel, updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, velocityDerivativesKernel);
+        ComputeHelper.SetBuffer(compute, densityBuffer, "Densities", pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, pressureCorrectionKernel, smoothingRadiusKernel, velocityDerivativesKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
         ComputeHelper.SetBuffer(compute, InternalEnergyBuffer, "InternalEnergies", pressureForceKernel, internalEnergyKernel, viscosityKernel, pressureCorrectionKernel);
         ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", smoothingRadiusKernel, pressureCorrectionKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, viscosityKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel);
-        ComputeHelper.SetBuffer(compute, smoothingRadiiBuffer, "SmoothingRadii", pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel);
-        ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel);
-        ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel);
+        ComputeHelper.SetBuffer(compute, smoothingRadiiBuffer, "SmoothingRadii", pressureForceKernel, viscosityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
+        ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
+        ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, viscosityKernel, gravityKernel, internalEnergyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, velocityDerivativesKernel);
         ComputeHelper.SetBuffer(compute, pressureCorrectionBuffer, "PressureCorrections", pressureCorrectionKernel, pressureForceKernel, internalEnergyKernel);
+        //ComputeHelper.SetBuffer(compute, velocityDerivativesBuffer, "BalsaraFactors", velocityDerivativesKernel, viscosityKernel, internalEnergyKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -200,8 +204,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         sorter.SortAndCalcOffsets(); // sort the indices and calculate the offsets
         octreeManager.UpdateOctree(); // update the octree mass values
         ComputeHelper.Dispatch(compute, particleCount, smoothingRadiusKernel); // calculate the smoothing radii for each particle
+        //ComputeHelper.Dispatch(compute, particleCount, velocityDerivativesKernel); // calculate the velocity derivatives for each particle
         ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity between particles
-        //ComputeHelper.Dispatch(compute, particleCount, densityCalculationKernel); // calculate the density at each particle
         ComputeHelper.Dispatch(compute, particleCount, internalEnergyKernel); // update the internal energies of the particles
         ComputeHelper.Dispatch(compute, particleCount, pressureCorrectionKernel); // calculate pressure corrections for smoothing radii changes
         ComputeHelper.Dispatch(compute, particleCount, pressureForceKernel); // calculate and apply pressure forces
@@ -355,7 +359,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     {
         ComputeHelper.Release(positionBuffer, velocityBuffer, densityBuffer, predictedPositionBuffer,
             OctreeBuffer, SpatialHashes, InternalEnergyBuffer, debugBuffer, pressureCorrectionBuffer, 
-            ResultantForceBuffer, smoothingRadiiBuffer, SpatialDataBuffer, SpatialOffsetsBuffer);
+            ResultantForceBuffer, smoothingRadiiBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, velocityDerivativesBuffer);
     }
 }
 

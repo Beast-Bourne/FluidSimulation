@@ -14047,7 +14047,7 @@ MonoBehaviour:
   timeScale: 0.5
   damping: 0.8
   pressureMultiplier: 0.2
-  viscocityMultiplier: 0.01
+  viscocityMultiplier: 0.1
   gasConstant: 1
   adiabaticIndex: 1.4
   useXSPH: 1
