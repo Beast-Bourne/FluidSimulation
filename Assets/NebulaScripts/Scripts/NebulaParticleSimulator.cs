@@ -50,7 +50,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float barnesHutAccuracyThreshold;
     public float softeningLength;
 
-    [Header("Energy Settings")]
+    [Header("Entropy Settings")]
     public float InitialTemperature;
     public float BoltzmannConstant;
     public float ProtonMass;
@@ -58,10 +58,17 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float coolingLambda;
     public float coolingAlpha;
     public int coolingSubcycles;
-    public float viscocityAlpha;
-    public float viscocityBeta;
-    public float viscocityEpsilon;
     public float conductionCoefficient;
+
+    [Header("Viscosity Settings")]
+    public float viscosityAlpha;
+    public float viscosityBeta;
+    public float viscosityEpsilon;
+
+    [Header("Fusion Settings")]
+    public float temperatureThreshold;
+    public float rateCoefficient;
+    public float energyPerUnitMass;
 
     [Header("Data Collection Settings")]
     public bool enableDataCollection;
@@ -75,12 +82,13 @@ public class NebulaParticleSimulator : MonoBehaviour
     const int gridHashKernel = 1;
     const int smoothingRadiusKernel = 2;
     const int balsaraFactorKernel = 3;
-    const int updateEntropyKernel = 4;
-    const int gravityKernel = 5;
-    const int pressureCorrectionKernel = 6;
-    const int pressureForceKernel = 7;
-    const int updatePositionKernel = 8;
-    const int initialiseEntropyKernel = 9;
+    const int fusionKernel = 4;
+    const int updateEntropyKernel = 5;
+    const int gravityKernel = 6;
+    const int pressureCorrectionKernel = 7;
+    const int pressureForceKernel = 8;
+    const int updatePositionKernel = 9;
+    const int initialiseEntropyKernel = 10;
 
     // other
     bool isPausedNextFrame;
@@ -105,10 +113,10 @@ public class NebulaParticleSimulator : MonoBehaviour
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel);
+        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
-        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", updateEntropyKernel);
+        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", fusionKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, updateEntropyKernel);
         ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel);
         ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel);
@@ -189,6 +197,9 @@ public class NebulaParticleSimulator : MonoBehaviour
         // BALSARA FACTOR
         ComputeHelper.Dispatch(compute, particleCount, balsaraFactorKernel);
 
+        // FUSION
+        ComputeHelper.Dispatch(compute, particleCount, fusionKernel);
+
         // ENTROPY AND VISCOCITY
         // updates the entropy (viscocity, conduction, cooling) and calculates the viscocity force
         ComputeHelper.Dispatch(compute, particleCount, updateEntropyKernel);
@@ -231,10 +242,14 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("coolingLambda", coolingLambda);
         compute.SetFloat("coolingAlpha", coolingAlpha);
         compute.SetInt("subcycles", coolingSubcycles);
-        compute.SetFloat("viscAlpha", viscocityAlpha);
-        compute.SetFloat("viscBeta", viscocityBeta);
-        compute.SetFloat("viscEpsilon", viscocityEpsilon);
+        compute.SetFloat("viscAlpha", viscosityAlpha);
+        compute.SetFloat("viscBeta", viscosityBeta);
+        compute.SetFloat("viscEpsilon", viscosityEpsilon);
         compute.SetFloat("conductionCoefficient", conductionCoefficient);
+
+        compute.SetFloat("fusionTempThreshold", temperatureThreshold);
+        compute.SetFloat("fusionRateCoefficient", rateCoefficient);
+        compute.SetFloat("energyPerUnitMass", energyPerUnitMass);
 
         compute.SetFloat("stage1Size", spatialStage1Size);
         compute.SetFloat("stage2Size", spatialStage2Size);
@@ -272,7 +287,9 @@ public class NebulaParticleSimulator : MonoBehaviour
                 smoothingRadius = spatialStage1Size,
                 pressureCorrection = 0.0f,
                 balsaraFactor = 1.0f,
-                temperature = InitialTemperature
+                temperature = InitialTemperature,
+                hydroWeight = 1.0f,
+                meanMolecularWeight = 0.0f
             };
             allParticles[i] = particle;
         }
@@ -319,34 +336,14 @@ public class NebulaParticleSimulator : MonoBehaviour
         float2[] debugData = new float2[particleCount];
         debugBuffer.GetData(debugData);
 
-        float total = 0.0f;
-        foreach (var data in debugData)
-        {
-            total += data.x;
-        }
-        Debug.Log($"Total entropy: {total}");
-
-        /*
-        bool hasPrinted = false;
-        int total = 0;
-
+        float highestRate = 0.0f;
         for (int i = 0; i < debugData.Length; i++)
         {
-            int Xthing = (int)(debugData[i].x * 10000);
-            int Ything = (int)(debugData[i].y * 10000);
-
-            if (Xthing != Ything)
-            {
-                total++;
-                if (hasPrinted) continue;
-
-                hasPrinted = true;
-                Debug.Log($"Debug Data Mismatch: {debugData[i].x} != {debugData[i].y} for particle {i}");
-            }
+            highestRate += debugData[i].x;
         }
 
-        Debug.Log($"Total Debug Mismatches: {total}");
-        */
+        highestRate /= debugData.Length;
+        Debug.Log("average temp: " + highestRate);
     }
 
     private void OnApplicationQuit()
@@ -402,4 +399,6 @@ public struct  ParticleData
     public float pressureCorrection;
     public float balsaraFactor;
     public float temperature;
+    public float hydroWeight;
+    public float meanMolecularWeight;
 }

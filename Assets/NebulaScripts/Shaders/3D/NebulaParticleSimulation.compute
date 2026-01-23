@@ -2,7 +2,8 @@
 #pragma kernel UpdatePredictions
 #pragma kernel UpdateGridHash
 #pragma kernel UpdateSmoothingRadii
-#pragma kernel VelocityDerivatives
+#pragma kernel CalculateBalsaraFactor
+#pragma kernel UpdateFusionRate
 #pragma kernel UpdateEntropies
 #pragma kernel CalculateGravity
 #pragma kernel CalculatePressureCorrection
@@ -25,6 +26,8 @@ struct ParticleData
     float pressureCorrection;
     float balsaraFactor;
     float temperature;
+    float hydroWeight;
+    float meanMolecularWeight;
 };
 
 // NOTE: should optimise this later (need padding for alignment)
@@ -112,11 +115,16 @@ const float coolingAlpha;
 const float subcycles;
 const float conductionCoefficient;
 
-//viscosity constants
+// viscosity constants
 const float viscAlpha;
 const float viscBeta;
 const float viscEpsilon;
 const float viscocityMultiplier;
+
+// fusion constants
+const float fusionTempThreshold;
+const float fusionRateCoefficient;
+const float energyPerUnitMass;
 
 // checks if a particle of the given index has collided with the outer bounds and updates its position and velocity accordingly
 ParticleData HandleCollisions(ParticleData particleData)
@@ -166,18 +174,9 @@ uint3 GetIndexDataFromLayer(uint targetIndex, uint targetLayer)
 
 uint GetSpatialOffsetFromLayer(uint key, uint targetLayer)
 {
-    if (targetLayer == 1)
-    {
-        return SpatialOffsetDataBuffer[key].x;
-    }
-    else if (targetLayer == 2)
-    {
-        return SpatialOffsetDataBuffer[key].y;
-    }
-    else
-    {
-        return SpatialOffsetDataBuffer[key].z;
-    }
+    if (targetLayer == 1) return SpatialOffsetDataBuffer[key].x;
+    else if (targetLayer == 2) return SpatialOffsetDataBuffer[key].y;
+    else return SpatialOffsetDataBuffer[key].z;
 }
 
 float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint particleIndex)
@@ -360,6 +359,15 @@ float CalculateParticlesDensity(float3 pos, float smoothRad)
     return density;
 }
 
+float CalculateFusionRate(float temp, float density, float hydroWeight)
+{
+    if (temp < fusionTempThreshold) return 0.0f;
+    
+    // NOTE: this is simple proton-proton fusion rate calculation, look into more complex rates later
+    float rate = fusionRateCoefficient * pow(temp, 4) * density * hydroWeight * hydroWeight;
+    return rate;
+}
+
 // kernel 0
 // updates the predicted positions of the particles
 // NOTE: look into having the predictions reflect particles off the bounds rather than just clamping them
@@ -391,7 +399,6 @@ void UpdatePredictions(uint3 id : SV_DispatchThreadID)
     {
         PredPos.z = halfSize.z * sign(PredPos.z);
     }
-    
     particle.predictedPos = PredPos;
     ParticleBuffer[id.x] = particle;
 }
@@ -469,7 +476,7 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
 // kernel 3
 // computes the velocity derivatives. (for balsara switch)
 [numthreads(threadCount, 1, 1)]
-void VelocityDerivatives(uint3 id : SV_DispatchThreadID)
+void CalculateBalsaraFactor(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     ParticleData particle = ParticleBuffer[id.x];
@@ -523,6 +530,30 @@ void VelocityDerivatives(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 4
+// calculate fusion rates and mass weights
+[numthreads(threadCount, 1, 1)]
+void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    ParticleData particle = ParticleBuffer[id.x];
+    
+    // calculate temperature this frame
+    particle.temperature = (protonMass * meanMolecularWeight / boltzmannConstant) * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1);
+    
+    float fusionRate = CalculateFusionRate(particle.temperature, particle.density, particle.hydroWeight);
+    float hydroChange = fusionRate * deltaTime / energyPerUnitMass;
+    
+    float hydroWeight = max(particle.hydroWeight - hydroChange, 0.0f);
+    float heliumWeight = min(1.0f - hydroWeight, 1.0f);
+    float meanMolecularWeight = 1.0f / (2.0f * hydroWeight + 0.75f * heliumWeight);
+    
+    particle.hydroWeight = hydroWeight;
+    particle.meanMolecularWeight = meanMolecularWeight;
+    ParticleBuffer[id.x] = particle;
+    DebugBuffer[id.x] = float2(particle.temperature, 0.0f);
+}
+
+// kernel 5
 // updates the entropy and calculated the viscosity force for each particle
 [numthreads(threadCount, 1, 1)]
 void UpdateEntropies(uint3 id : SV_DispatchThreadID)
@@ -584,42 +615,41 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
             float tempDiff = particle.temperature - adjParticle.temperature;
             float conductionFlux = (conductionCoefficient * tempDiff * CubicSplineDerivativeInfluence(dist, avgSmoothRad) * particleMass);
             float entropyFactor = (adiabaticIndex - 1) / avgDensFactor;
-            //condTerm += (conductionFlux * entropyFactor);
+            condTerm += (conductionFlux * entropyFactor);
             
-            // viscocity calculations
+            // viscosity calculations
             float relVelAlongOffset = dot(relVel, offsetToAdj);
             
-            float avgSoundSpeed = 0.5 * (soundSpeed + adjSoundSpeed);
-                
-            float avgDensity = 0.5 * (particle.density + adjParticle.density);
-            float massFactor = (avgSmoothRad * relVelAlongOffset) / (sqrDistToAdj + (viscEpsilon * avgSmoothRad * avgSmoothRad));
-
-            float avgBalsara = 0.5f * (particle.balsaraFactor + adjParticle.balsaraFactor);
-            float artVisc = avgBalsara * (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
-            
-            float3 viscocityTerm = -0.5 * particleMass * artVisc * gradW;
-            viscosityForce += viscocityTerm;
-            
-            // viscocity heating term (only for converging particles to model shock dissipation)
+            // viscosity only applies for converging particles to model shock dissipation
             if (relVelAlongOffset < 0)
             {
+                float avgSoundSpeed = 0.5 * (soundSpeed + adjSoundSpeed);
+                
+                float avgDensity = 0.5 * (particle.density + adjParticle.density);
+                float massFactor = (avgSmoothRad * relVelAlongOffset) / (sqrDistToAdj + (viscEpsilon * avgSmoothRad * avgSmoothRad));
+
+                float avgBalsara = 0.5f * (particle.balsaraFactor + adjParticle.balsaraFactor);
+                float artVisc = avgBalsara * (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
+            
+                float3 forceTerm = -0.5 * particleMass * artVisc * gradW;
+                viscosityForce += forceTerm;
+                
                 float viscosityTerm = 0.5 * particleMass * artVisc * velDivTerm;
-                float entropyConvert = (adiabaticIndex - 1) / densFactor;
+                float entropyConvert = (adiabaticIndex - 1) / pow(abs(particle.density), adiabaticIndex);
                 viscTerm += (viscosityTerm * entropyConvert);
             }
         }
     }
 
     float change = (viscTerm + condTerm) * deltaTime;
-    //change += ApplyCooling(particle.entropy, particle.density);
+    change += ApplyCooling(particle.entropy, particle.density);
     particle.entropy += change;
     
     ParticleBuffer[id.x] = particle;
     ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
-    DebugBuffer[id.x] = float2(ParticleBuffer[id.x].entropy, 0.0f);
 }
 
-// kernel 5
+// kernel 6
 // calculates the gravity force between the particles
 [numthreads(threadCount,1,1)]
 void CalculateGravity(uint3 id : SV_DispatchThreadID)
@@ -636,7 +666,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += gravityAccel;
 }
 
-// kernel 6
+// kernel 7
 // Calculates the pressure correction for smoothing radius changes
 [numthreads(threadCount, 1, 1)]
 void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
@@ -693,7 +723,7 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
     ParticleBuffer[id.x] = particle;
 }
 
-// kernel 7
+// kernel 8
 // calculates the pressure force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
@@ -744,7 +774,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += pressureForce * pressureMultiplier;
 }
 
-// kernel 8
+// kernel 9
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
@@ -753,7 +783,6 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     
     ParticleData particle = ParticleBuffer[id.x];
     particle.velocity += ResultantForces[id.x] * deltaTime;
-    particle.temperature = (protonMass * meanMolecularWeight / boltzmannConstant) * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1);
     
     // XSPH is a velocity smoothing technique that helps reduce numerical instabilities
     if (useXSPH)
@@ -802,7 +831,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     ParticleBuffer[id.x] = HandleCollisions(particle);
 }
 
-// kernel 9
+// kernel 10
 // run once at the start of the simulation to set the inital entropy values
 [numthreads(threadCount, 1, 1)]
 void InitialiseEntropy(uint3 id : SV_DispatchThreadID)
