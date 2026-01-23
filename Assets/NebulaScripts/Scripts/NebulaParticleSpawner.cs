@@ -18,7 +18,6 @@ public class NebulaParticleSpawner : MonoBehaviour
     {
         ParticleSpawnData data = new ParticleSpawnData(particlesPerSide * particlesPerSide * particlesPerSide);
 
-        float initialEnergy = (boltzmannConst * InitialTemp) / (protonMass * MeanMolecularWeight * (adiabaticIndex - 1f));
         int particleNum = 0;
 
         for (int x = 0; x < particlesPerSide; x++)
@@ -42,7 +41,6 @@ public class NebulaParticleSpawner : MonoBehaviour
                     float3 randOffset = UnityEngine.Random.insideUnitSphere * randomOffsetStrength;
                     data.positions[particleNum] = new float3(px, py, pz) + randOffset;
                     data.velocities[particleNum] = new float3(velX, velY, velZ);
-                    data.energies[particleNum] = initialEnergy;
                     particleNum++;
                 }
             }
@@ -74,14 +72,12 @@ public class NebulaParticleSpawner : MonoBehaviour
     {
         public float3[] positions;
         public float3[] velocities;
-        public float[] energies;
 
         // Constructor
         public ParticleSpawnData(int num)
         {
             positions = new float3[num];
             velocities = new float3[num];
-            energies = new float[num];
         }
     }
 }

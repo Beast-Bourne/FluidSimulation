@@ -3,12 +3,12 @@
 #pragma kernel UpdateGridHash
 #pragma kernel UpdateSmoothingRadii
 #pragma kernel VelocityDerivatives
+#pragma kernel UpdateEntropies
 #pragma kernel CalculateGravity
 #pragma kernel CalculatePressureCorrection
 #pragma kernel CalculatePressureForce
-#pragma kernel CalculateEnergies
-#pragma kernel CalculateViscosities
 #pragma kernel UpdatePositions
+#pragma kernel InitialiseEntropy
 
 // Includes
 #include "../GridHelper.hlsl"
@@ -21,9 +21,10 @@ struct ParticleData
     float3 velocity;
     float density;
     float smoothingRadius;
-    float internelEnergy;
+    float entropy;
     float pressureCorrection;
     float balsaraFactor;
+    float temperature;
 };
 
 // NOTE: should optimise this later (need padding for alignment)
@@ -100,7 +101,6 @@ const float pressureMultiplier;
 const bool useXSPH;
 const float gasConstant;
 const float adiabaticIndex;
-const uint targetNeighborCount;
 const bool useDynamicSmoothingRadius;
 
 // energy constants
@@ -276,40 +276,32 @@ float LambdaFunction(float temp)
     return coolingLambda * pow(abs(temp), coolingAlpha);
 }
 
-ParticleData ApplyCooling(ParticleData particleData)
+float ApplyCooling(float entropy, float dens)
 {
-    float dens = particleData.density;
-    float intEnergy = particleData.internelEnergy;
-    
-    float temp = intEnergy * (adiabaticIndex - 1) * protonMass * meanMolecularWeight / boltzmannConstant;
-    
-    float densFactor = dens / (protonMass * protonMass * meanMolecularWeight * meanMolecularWeight);
-    float lambdaFunc = LambdaFunction(temp);
-    float coolingRate = - densFactor * lambdaFunc;
+    float originEntropy = entropy;
+    float mu_mp = meanMolecularWeight * protonMass;
     
     float timeRemaining = deltaTime;
     int step = 0;
-    while (timeRemaining > 0.0 && step < subcycles) // NOTE: Determine if this subscycling is actually needed since its all done in one frame anyway
+    while (timeRemaining > 0.0f && step < subcycles)
     {
         float dt = min(timeRemaining, deltaTime / subcycles);
-        float newEnergy = intEnergy + coolingRate * dt;
         
-        // if the energy would go negative then limit the cooling to prevent that
-        if (newEnergy < 1e-8) { intEnergy = 1e-8; break; }
+        float temp = (mu_mp / boltzmannConstant) * entropy * pow(abs(dens), adiabaticIndex - 1);
+        float Lambda = LambdaFunction(temp);
         
-        intEnergy = newEnergy;
+        float dS_dt = -(adiabaticIndex - 1) * Lambda * pow(abs(dens), 2 - adiabaticIndex) / (mu_mp * mu_mp);
+        float newEntropy = entropy + (dS_dt * dt);
         
-        // recompute temperature and cooling rate to reflect the new energy
-        temp = intEnergy * (adiabaticIndex - 1) * protonMass * meanMolecularWeight / boltzmannConstant;
-        lambdaFunc = LambdaFunction(temp);
-        coolingRate = -densFactor * lambdaFunc;
+        if (newEntropy < 1e-8) { entropy = 1e-8; break; }
         
+        entropy = newEntropy;
         timeRemaining -= dt;
         step++;
+
     }
     
-    particleData.internelEnergy = intEnergy;
-    return particleData;
+    return (entropy - originEntropy);
 }
 
 float GetTargetLayerSize(float smoothRad)
@@ -442,7 +434,7 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 2
-// updates the smoothing radii for each particle based on the local density
+// updates the smoothing radius and density of each particle
 [numthreads(threadCount, 1, 1)]
 void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
 {
@@ -453,6 +445,7 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
     {
         particle.smoothingRadius = stage1Size;
         particle.density = CalculateParticlesDensity(particle.predictedPos, stage1Size);
+        ParticleBuffer[id.x] = particle;
         return;
     }
     
@@ -530,6 +523,103 @@ void VelocityDerivatives(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 4
+// updates the entropy and calculated the viscosity force for each particle
+[numthreads(threadCount, 1, 1)]
+void UpdateEntropies(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    ParticleData particle = ParticleBuffer[id.x];
+    float smoothRad = particle.smoothingRadius;
+    
+    int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(10.5f));
+    
+    float viscTerm = 0.0; // heating from artificial viscosity
+    float condTerm = 0.0; // heating from thermal conduction
+    
+    float3 viscosityForce = 0.0f;
+    
+    for (int i = 0; i < 27; i++)
+    {
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = GetSpatialOffsetFromLayer(key, 3);
+        
+        while (index < numParticles)
+        {
+            uint3 indexData = GetIndexDataFromLayer(index, 3);
+            index++;
+            
+            if (indexData[2] != key) break;
+            if (indexData[1] != hash) continue;
+            
+            uint adjIndex = indexData[0];
+            if (adjIndex == id.x) continue;
+            
+            ParticleData adjParticle = ParticleBuffer[adjIndex];
+            
+            float3 offsetToAdj = particle.predictedPos - adjParticle.predictedPos;
+            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
+            
+            // use average smoothing radius since this is a pairwise interaction
+            float avgSmoothRad = 0.5 * (smoothRad + adjParticle.smoothingRadius);
+            if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
+            
+            float dist = sqrt(sqrDistToAdj);
+            float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
+            
+            // compute needed properties
+            float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
+            
+            float densFactor = pow(abs(particle.density), adiabaticIndex - 1);
+            float adjDensFactor = pow(abs(adjParticle.density), adiabaticIndex - 1);
+            float avgDensFactor = 0.5 * (densFactor + adjDensFactor);
+            
+            float3 relVel = particle.velocity - adjParticle.velocity;
+            float velDivTerm = dot(relVel, gradW);
+            
+            float soundSpeed = sqrt(max(adiabaticIndex * particle.entropy * densFactor, 1e-12));
+            float adjSoundSpeed = sqrt(max(adiabaticIndex * adjParticle.entropy * adjDensFactor, 1e-12));
+            
+            // conduction heating term
+            float tempDiff = particle.temperature - adjParticle.temperature;
+            float conductionFlux = (conductionCoefficient * tempDiff * CubicSplineDerivativeInfluence(dist, avgSmoothRad) * particleMass);
+            float entropyFactor = (adiabaticIndex - 1) / avgDensFactor;
+            //condTerm += (conductionFlux * entropyFactor);
+            
+            // viscocity calculations
+            float relVelAlongOffset = dot(relVel, offsetToAdj);
+            
+            float avgSoundSpeed = 0.5 * (soundSpeed + adjSoundSpeed);
+                
+            float avgDensity = 0.5 * (particle.density + adjParticle.density);
+            float massFactor = (avgSmoothRad * relVelAlongOffset) / (sqrDistToAdj + (viscEpsilon * avgSmoothRad * avgSmoothRad));
+
+            float avgBalsara = 0.5f * (particle.balsaraFactor + adjParticle.balsaraFactor);
+            float artVisc = avgBalsara * (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
+            
+            float3 viscocityTerm = -0.5 * particleMass * artVisc * gradW;
+            viscosityForce += viscocityTerm;
+            
+            // viscocity heating term (only for converging particles to model shock dissipation)
+            if (relVelAlongOffset < 0)
+            {
+                float viscosityTerm = 0.5 * particleMass * artVisc * velDivTerm;
+                float entropyConvert = (adiabaticIndex - 1) / densFactor;
+                viscTerm += (viscosityTerm * entropyConvert);
+            }
+        }
+    }
+
+    float change = (viscTerm + condTerm) * deltaTime;
+    //change += ApplyCooling(particle.entropy, particle.density);
+    particle.entropy += change;
+    
+    ParticleBuffer[id.x] = particle;
+    ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
+    DebugBuffer[id.x] = float2(ParticleBuffer[id.x].entropy, 0.0f);
+}
+
+// kernel 5
 // calculates the gravity force between the particles
 [numthreads(threadCount,1,1)]
 void CalculateGravity(uint3 id : SV_DispatchThreadID)
@@ -546,7 +636,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += gravityAccel;
 }
 
-// kernel 5
+// kernel 6
 // Calculates the pressure correction for smoothing radius changes
 [numthreads(threadCount, 1, 1)]
 void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
@@ -596,14 +686,14 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
     float newCorrection = 1.0f - (densityTerm * sum_dW_dh);
     newCorrection = clamp(newCorrection, 0.2f, 2.0f);
     
-    float pressure = (adiabaticIndex - 1) * density * particle.internelEnergy;
+    float pressure = particle.entropy * pow(abs(particle.density), adiabaticIndex);
     float pressureTerm = (pressure / (density * density * newCorrection));
     
     particle.pressureCorrection = pressureTerm;
     ParticleBuffer[id.x] = particle;
 }
 
-// kernel 6
+// kernel 7
 // calculates the pressure force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
@@ -654,156 +744,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += pressureForce * pressureMultiplier;
 }
 
-// kernel 7
-// calculates the internal energy for each particle
-[numthreads(threadCount, 1, 1)]
-void CalculateEnergies(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= numParticles) return;
-    ParticleData particle = ParticleBuffer[id.x];
-    float smoothRad = particle.smoothingRadius;
-    
-    int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(smoothRad));
-    
-    float compTerm = 0.0; // heating from compression
-    float viscTerm = 0.0; // heating from artificial viscosity
-    float condTerm = 0.0; // heating from thermal conduction
-    
-    for (int i = 0; i < 27; i++)
-    {
-        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
-        uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
-        
-        while (index < numParticles)
-        {
-            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
-            index++;
-            
-            if (indexData[2] != key) break;
-            if (indexData[1] != hash) continue;
-            
-            uint adjIndex = indexData[0];
-            if (adjIndex == id.x) continue;
-            
-            ParticleData adjParticle = ParticleBuffer[adjIndex];
-            
-            float3 offsetToAdj = particle.predictedPos - adjParticle.predictedPos;
-            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
-            
-            // use average smoothing radius since this is a pairwise interaction
-            float avgSmoothRad = 0.5 * (smoothRad + adjParticle.smoothingRadius);
-            if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
-            
-            float dist = sqrt(sqrDistToAdj);
-            float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
-            
-            float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
-            
-            // conduction term
-            float condMassFactor = (particleMass * conductionCoefficient) / (particle.density * adjParticle.density);
-            condTerm += 0.5 * condMassFactor * (adjParticle.internelEnergy - particle.internelEnergy) * CubicSplineInfluence(dist, avgSmoothRad);
-            
-            // compute compression term
-            float pressTerm = particle.pressureCorrection + adjParticle.pressureCorrection;
-            float3 relVel = particle.velocity - adjParticle.velocity;
-            float velDivTerm = dot(relVel, gradW);
-            float compressionTerm = 0.5 * particleMass * pressTerm * velDivTerm;
-            compTerm += clamp(compressionTerm, -0.05f*particle.internelEnergy, 0.05f*particle.internelEnergy);
-            
-            // compute artificial viscosity term only for converging particles
-            float relVelAlongOffset = dot(relVel, offsetToAdj);
-            if (relVelAlongOffset < 0)
-            {
-                float soundSpeed = sqrt(max(adiabaticIndex * (adiabaticIndex-1)*particle.internelEnergy, 1e-12));
-                float adjSoundSpeed = sqrt(max(adiabaticIndex * (adiabaticIndex - 1) * adjParticle.internelEnergy, 1e-12));
-                float avgSoundSpeed = 0.5 * (soundSpeed + adjSoundSpeed);
-                
-                float avgDensity = 0.5 * (particle.density + adjParticle.density);
-                float massFactor = (avgSmoothRad * relVelAlongOffset) / (sqrDistToAdj + (viscEpsilon * avgSmoothRad * avgSmoothRad));
-
-                float avgBalsara = 0.5f * (particle.balsaraFactor + adjParticle.balsaraFactor);
-                float artVisc = avgBalsara * (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
-                float viscocityTerm = 0.5 * particleMass * artVisc * velDivTerm;
-                viscTerm += viscocityTerm;
-            }
-        }
-    }
-
-    float change = (viscTerm + compTerm + condTerm) * deltaTime;
-    particle.internelEnergy = max(particle.internelEnergy + change, 1e-8);
-    
-    ParticleBuffer[id.x] = ApplyCooling(particle);
-}
-
 // kernel 8
-// calculates the viscosity force for each particle and updates the velocities
-[numthreads(threadCount,1,1)]
-void CalculateViscosities(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= numParticles) return;
-    ParticleData particle = ParticleBuffer[id.x];
-    
-    float smoothRad = particle.smoothingRadius;
-    int3 gridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(smoothRad));
-    float3 viscosityForce = 0;
-    
-    for (int i = 0; i < 27; i++)
-    {
-        uint hash = HashGridPos3D(gridPos + GridOffsets3D[i]);
-        uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
-        
-        while (index < numParticles)
-        {
-            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
-            index++;
-            
-            if (indexData[2] != key) break;
-            if (indexData[1] != hash) continue;
-            
-            uint adjIndex = indexData[0];
-            if (adjIndex == id.x) continue;
-            
-            ParticleData adjParticle = ParticleBuffer[adjIndex];
-            
-            float3 offsetToAdj = particle.predictedPos - adjParticle.predictedPos;
-            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
-            
-            // use average smoothing radius since this is a pairwise interaction
-            float avgSmoothRad = 0.5 * (smoothRad + adjParticle.smoothingRadius);
-            if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
-            
-            float3 relVel = particle.velocity - adjParticle.velocity;
-            float relVelAlongOffset = dot(relVel, offsetToAdj);
-            if (relVelAlongOffset > 0) continue; // only apply viscosity for converging particles
-            
-            // get needed properties
-            float dist = sqrt(sqrDistToAdj);
-            float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
-            
-            // compute sound speeds
-            float soundSpeed = sqrt(max(adiabaticIndex * (adiabaticIndex - 1) * particle.internelEnergy, 1e-12));
-            float adjSoundSpeed = sqrt(max(adiabaticIndex * (adiabaticIndex - 1) * adjParticle.internelEnergy, 1e-12));
-            float avgSoundSpeed = 0.5 * (soundSpeed + adjSoundSpeed);
-            
-            // compute mass factor
-            float avgDensity = 0.5 * (particle.density + adjParticle.density);
-            float massFactor = (avgSmoothRad * relVelAlongOffset) / (sqrDistToAdj + (viscEpsilon * avgSmoothRad * avgSmoothRad));
-
-            // compute artificial viscosity term
-            float avgBalsara = 0.5f * (particle.balsaraFactor + adjParticle.balsaraFactor);
-            float artVisc = avgBalsara * (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
-            float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
-            float3 viscocityTerm = -0.5 * particleMass * artVisc * gradW;
-            viscosityForce += viscocityTerm;
-        }
-    }
-    
-    ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
-}
-
-// kernel 9
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
@@ -812,6 +753,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     
     ParticleData particle = ParticleBuffer[id.x];
     particle.velocity += ResultantForces[id.x] * deltaTime;
+    particle.temperature = (protonMass * meanMolecularWeight / boltzmannConstant) * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1);
     
     // XSPH is a velocity smoothing technique that helps reduce numerical instabilities
     if (useXSPH)
@@ -858,4 +800,20 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     
     particle.position += particle.velocity * deltaTime;
     ParticleBuffer[id.x] = HandleCollisions(particle);
+}
+
+// kernel 9
+// run once at the start of the simulation to set the inital entropy values
+[numthreads(threadCount, 1, 1)]
+void InitialiseEntropy(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    
+    ParticleData particle = ParticleBuffer[id.x];
+    
+    const float initialTemp = 50.0f; // Kelvin
+    float entropy = ((boltzmannConstant * initialTemp) / (protonMass * meanMolecularWeight)) * pow(abs(particle.density), 1 - adiabaticIndex);
+
+    particle.entropy = entropy;
+    ParticleBuffer[id.x] = particle;
 }

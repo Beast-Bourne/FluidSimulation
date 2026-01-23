@@ -6,7 +6,8 @@ public enum ParticleDisplayMode
 {
     Density = 0,
     Velocity = 1,
-    Energy = 2
+    Entropy = 2,
+    Temperature = 3
 }
 
 public class NebulaParticleDisplay : MonoBehaviour
@@ -31,6 +32,8 @@ public class NebulaParticleDisplay : MonoBehaviour
     public float velocityDisplayMax;
     public float energyDisplayMin;
     public float energyDisplayMax;
+    public float temperatureDisplayMin;
+    public float temperatureDisplayMax;
     public ParticleDisplayMode displayMode;
 
     ComputeBuffer argsBuffer;
@@ -74,6 +77,8 @@ public class NebulaParticleDisplay : MonoBehaviour
             material.SetFloat("velocityMax", velocityDisplayMax);
             material.SetFloat("energyMin", energyDisplayMin);
             material.SetFloat("energyMax", energyDisplayMax);
+            material.SetFloat("tempMin", temperatureDisplayMin);
+            material.SetFloat("tempMax", temperatureDisplayMax);
             material.SetInt("displayType", (int)displayMode);
 
             // check if the below can be removed

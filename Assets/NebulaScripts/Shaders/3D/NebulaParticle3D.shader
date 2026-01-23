@@ -29,6 +29,7 @@ Shader "Hidden/Particle3D"
                 float internelEnergy;
                 float pressureCorrection;
                 float balsaraFactor;
+                float temperature;
             };
 
             StructuredBuffer<ParticleData> particles;
@@ -43,6 +44,8 @@ Shader "Hidden/Particle3D"
             float velocityMax;
             float energyMin;
             float energyMax;
+            float tempMin;
+            float tempMax;
             int displayType;
 
             float3 colour; // check if this can be removed
@@ -73,6 +76,12 @@ Shader "Hidden/Particle3D"
                     float energy = particles[instanceID].internelEnergy;
                     float energyT = saturate((energy - energyMin) / (energyMax - energyMin));
                     colT = energyT;
+                }
+                else if (displayType == 3)
+                {
+                    float temperature = particles[instanceID].temperature;
+                    float tempT = saturate((temperature - tempMin) / (tempMax - tempMin));
+                    colT = tempT;
                 }
 
                 float3 centreWorld = particles[instanceID].position;
