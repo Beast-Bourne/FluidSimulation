@@ -14043,15 +14043,14 @@ MonoBehaviour:
   display: {fileID: 1749289515}
   octreeManager: {fileID: 951483483}
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
-  fixedTimeStep: 0
-  timeScale: 0.01
+  CFLScale: 0
   damping: 0.8
   pressureMultiplier: 0.2
   viscocityMultiplier: 0.1
   gasConstant: 1
   adiabaticIndex: 1.4
   useXSPH: 1
-  isPaused: 0
+  isPaused: 1
   minFactor: 0.75
   spatialStage1Size: 0.5
   spatialStage2Size: 0.75
@@ -14247,7 +14246,7 @@ MonoBehaviour:
   energyDisplayMax: 32
   temperatureDisplayMin: 45
   temperatureDisplayMax: 55
-  displayMode: 2
+  displayMode: 0
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

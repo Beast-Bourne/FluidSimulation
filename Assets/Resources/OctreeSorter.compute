@@ -40,6 +40,10 @@ struct ParticleData
     float internelEnergy;
     float pressureCorrection;
     float balsaraFactor;
+    float divV;
+    float temperature;
+    float hydroWeight;
+    float meanMolecularWeight;
 };
 
 RWStructuredBuffer<OctreeNode> Octree;

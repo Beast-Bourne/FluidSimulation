@@ -5,6 +5,7 @@ using UnityEngine;
 
 public class NebulaParticleSpawner : MonoBehaviour
 {
+    [Range(2, 256)]
     public int particlesPerSide;
     public Vector3 spawnCentre;
     public float spawnSize;

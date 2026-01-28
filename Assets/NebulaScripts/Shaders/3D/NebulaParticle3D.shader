@@ -29,7 +29,10 @@ Shader "Hidden/Particle3D"
                 float internelEnergy;
                 float pressureCorrection;
                 float balsaraFactor;
+                float divV;
                 float temperature;
+                float hydroWeight;
+                float meanMolecularWeight;
             };
 
             StructuredBuffer<ParticleData> particles;

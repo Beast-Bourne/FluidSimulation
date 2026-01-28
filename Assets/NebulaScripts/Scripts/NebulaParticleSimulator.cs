@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
 using Unity.Mathematics;
-using Unity.VisualScripting;
 using UnityEngine;
 
 public class NebulaParticleSimulator : MonoBehaviour
@@ -17,6 +16,8 @@ public class NebulaParticleSimulator : MonoBehaviour
     // buffers for the compute shader
     public ComputeBuffer particleBuffer { get; private set; }
     ComputeBuffer ResultantForceBuffer;
+    ComputeBuffer deltaTimeBuffer;
+    ComputeBuffer globalDeltaTimeBuffer;
     ComputeBuffer OctreeBuffer;
     ComputeBuffer SpatialHashes;
     ComputeBuffer debugBuffer;
@@ -26,9 +27,11 @@ public class NebulaParticleSimulator : MonoBehaviour
     ComputeBuffer SpatialOffsetsBuffer;
     BufferSorter sorter;
 
+    // timestep manager
+    TimestepManager timestepManager;
+
     [Header("Simulation Settings")]
-    public bool fixedTimeStep;
-    public float timeScale;
+    public float CFLScale;
     public float damping;
     public float pressureMultiplier;
     public float viscocityMultiplier;
@@ -82,16 +85,16 @@ public class NebulaParticleSimulator : MonoBehaviour
     const int gridHashKernel = 1;
     const int smoothingRadiusKernel = 2;
     const int balsaraFactorKernel = 3;
-    const int fusionKernel = 4;
-    const int updateEntropyKernel = 5;
-    const int gravityKernel = 6;
-    const int pressureCorrectionKernel = 7;
-    const int pressureForceKernel = 8;
-    const int updatePositionKernel = 9;
-    const int initialiseEntropyKernel = 10;
+    const int deltaTimeKernel = 4;
+    const int fusionKernel = 5;
+    const int updateEntropyKernel = 6;
+    const int gravityKernel = 7;
+    const int pressureCorrectionKernel = 8;
+    const int pressureForceKernel = 9;
+    const int updatePositionKernel = 10;
+    const int initialiseEntropyKernel = 11;
 
     // other
-    bool isPausedNextFrame;
     NebulaParticleSpawner.ParticleSpawnData spawnData;
     public int particleCount { get; private set; }
     float timeElapsed;
@@ -108,15 +111,19 @@ public class NebulaParticleSimulator : MonoBehaviour
         SpatialHashes = ComputeHelper.CreateStructuredBuffer<uint>(octreeManager.NumBottomLayerNodes * (int)octreeManager.NumOfHashesPerLeafNode);
         debugBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
         ResultantForceBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
+        deltaTimeBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
+        globalDeltaTimeBuffer = ComputeHelper.CreateStructuredBuffer<float>(1);
         SpatialDataBuffer = ComputeHelper.CreateStructuredBuffer<SpatialData>(particleCount);
         SpatialOffsetsBuffer = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel);
+        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
         ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", fusionKernel);
+        ComputeHelper.SetBuffer(compute, deltaTimeBuffer, "DeltaTimeBuffer", deltaTimeKernel);
+        ComputeHelper.SetBuffer(compute, globalDeltaTimeBuffer, "GlobalDeltaTimeBuffer", deltaTimeKernel, fusionKernel, updateEntropyKernel, updatePositionKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, updateEntropyKernel);
         ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel);
         ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel);
@@ -124,6 +131,9 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         sorter = new();
         sorter.SetBuffers(SpatialDataBuffer, SpatialOffsetsBuffer);
+
+        timestepManager = new();
+        timestepManager.SetBuffers(deltaTimeBuffer, globalDeltaTimeBuffer, particleCount);
 
         octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, spatialStage1Size, SpatialDataBuffer, SpatialOffsetsBuffer, particleCount, particleBuffer, particleMass);
 
@@ -135,19 +145,10 @@ public class NebulaParticleSimulator : MonoBehaviour
     // Runs the simulation frame by frame
     private void Update()
     {
-        if (!fixedTimeStep)
-        {
-            RunSimulationFrame(Time.deltaTime);
-        }
+        // run the simulation step
+        RunSimulationFrame();
 
-        if (isPausedNextFrame)
-        {
-            isPaused = true;
-            isPausedNextFrame = false;
-        }
-
-        HandleUserImput();
-
+        // if data collection is enabled, sample the frame rate at set intervals
         if (totalTimeElapsed < TotalSampleTime && enableDataCollection)
         {
             SampleFrameRate(Time.deltaTime);
@@ -160,22 +161,13 @@ public class NebulaParticleSimulator : MonoBehaviour
         }
     }
 
-    // Runs the simulation step in fixed time intervals if the fixedTimeStep variable is set to true
-    private void FixedUpdate()
-    {
-        if (fixedTimeStep)
-        {
-            RunSimulationFrame(Time.fixedDeltaTime * timeScale);
-        }
-    }
-
     // updates the compute settings and runs the simulation step. Flags an event to say the simulation step has finished
-    void RunSimulationFrame(float frameTime)
+    void RunSimulationFrame()
     {
         if (isPaused) return;
         if (Time.frameCount < 10) return; // skip first few frames to avoid a disproportionate delta time
 
-        UpdateComputeSettings(frameTime);
+        UpdateComputeSettings();
         RunSimulationStep();
         SimulationStepFinished?.Invoke(); // the '?' is a null-conditional operator (won't run the event if there is no subscribed action)
     }
@@ -196,6 +188,9 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         // BALSARA FACTOR
         ComputeHelper.Dispatch(compute, particleCount, balsaraFactorKernel);
+
+        // ADAPTIVE DELTA TIME
+        ComputeHelper.Dispatch(compute, particleCount, deltaTimeKernel);
 
         // FUSION
         ComputeHelper.Dispatch(compute, particleCount, fusionKernel);
@@ -220,9 +215,9 @@ public class NebulaParticleSimulator : MonoBehaviour
     }
 
     // Updates the compute settings for the simulation that are intended to be changeable during runtime
-    void UpdateComputeSettings(float deltaTime)
+    void UpdateComputeSettings()
     {
-        compute.SetFloat("deltaTime", deltaTime);
+        compute.SetFloat("CFL", CFLScale);
         compute.SetFloat("gravity", gravity);
         compute.SetFloat("particleMass", particleMass);
         compute.SetFloat("BarnesHutTheta", barnesHutAccuracyThreshold);
@@ -287,6 +282,7 @@ public class NebulaParticleSimulator : MonoBehaviour
                 smoothingRadius = spatialStage1Size,
                 pressureCorrection = 0.0f,
                 balsaraFactor = 1.0f,
+                divV = 0.0f,
                 temperature = InitialTemperature,
                 hydroWeight = 1.0f,
                 meanMolecularWeight = 0.0f
@@ -295,27 +291,10 @@ public class NebulaParticleSimulator : MonoBehaviour
         }
 
         particleBuffer.SetData(allParticles);
-    }
 
-    // Handles user input to pause the simulation, reset it, or run a single frame
-    void HandleUserImput()
-    {
-        if (Input.GetKeyDown(KeyCode.Space))
-        {
-            isPaused = !isPaused;
-        }
-
-        if (Input.GetKeyDown(KeyCode.R))
-        {
-            isPaused = true;
-            SetInitialBufferData(spawnData);
-        }
-
-        if (Input.GetKeyDown(KeyCode.RightArrow))
-        {
-            isPaused = false;
-            isPausedNextFrame = true;
-        }
+        // temporary to test delta time buffer
+        float[] deltaT = new float[1] { 0.00694f };
+        globalDeltaTimeBuffer.SetData(deltaT);
     }
 
     void SampleFrameRate(float deltaTime)
@@ -359,6 +338,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     // runs the first few steps of the simulation to initialise particle properties like density and entropy
     private void InitialiseParticleProperties()
     {
+        UpdateComputeSettings();
         ComputeHelper.Dispatch(compute, particleCount, UpdatePredictionsKernel);
         ComputeHelper.Dispatch(compute, particleCount, gridHashKernel);
         sorter.SortAndCalcOffsets();
@@ -398,6 +378,7 @@ public struct  ParticleData
     public float entropy;
     public float pressureCorrection;
     public float balsaraFactor;
+    public float divV;
     public float temperature;
     public float hydroWeight;
     public float meanMolecularWeight;

@@ -3,6 +3,7 @@
 #pragma kernel UpdateGridHash
 #pragma kernel UpdateSmoothingRadii
 #pragma kernel CalculateBalsaraFactor
+#pragma kernel CalculateAdaptiveTimestep
 #pragma kernel UpdateFusionRate
 #pragma kernel UpdateEntropies
 #pragma kernel CalculateGravity
@@ -25,6 +26,7 @@ struct ParticleData
     float entropy;
     float pressureCorrection;
     float balsaraFactor;
+    float divV;
     float temperature;
     float hydroWeight;
     float meanMolecularWeight;
@@ -68,6 +70,8 @@ static const int threadCount = 64;
 // property buffers
 RWStructuredBuffer<ParticleData> ParticleBuffer;
 RWStructuredBuffer<float3> ResultantForces;
+RWStructuredBuffer<float> DeltaTimeBuffer; // holds the per-particle adaptive timestep values
+RWStructuredBuffer<float> GlobalDeltaTimeBuffer; // holds the global delta time value for the current frame (computed on a different shader that's run between kernel 4 and 5)
 
 RWStructuredBuffer<float2> DebugBuffer;
 
@@ -89,7 +93,7 @@ const float minSizeFactor;
 
 // general constants
 const uint numParticles;
-const float deltaTime;
+const float CFL;
 const float3 boundSize;
 const float damping;
 
@@ -280,11 +284,11 @@ float ApplyCooling(float entropy, float dens)
     float originEntropy = entropy;
     float mu_mp = meanMolecularWeight * protonMass;
     
-    float timeRemaining = deltaTime;
+    float timeRemaining = GlobalDeltaTimeBuffer[0];
     int step = 0;
     while (timeRemaining > 0.0f && step < subcycles)
     {
-        float dt = min(timeRemaining, deltaTime / subcycles);
+        float dt = min(timeRemaining, GlobalDeltaTimeBuffer[0] / subcycles);
         
         float temp = (mu_mp / boltzmannConstant) * entropy * pow(abs(dens), adiabaticIndex - 1);
         float Lambda = LambdaFunction(temp);
@@ -512,24 +516,52 @@ void CalculateBalsaraFactor(uint3 id : SV_DispatchThreadID)
             float avgSmoothRad = 0.5 * (smoothRad + adjParticle.smoothingRadius);
             if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
             
+            float dist = sqrt(sqrDistToAdj);
+            float3 dirToAdj = offsetToAdj / (dist + 1e-6);
+            
             float3 relVel = adjParticle.velocity - particle.velocity;
-            float gradW = CubicSplineInfluence(sqrt(sqrDistToAdj), avgSmoothRad);
+            float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
             float m_dens = particleMass / adjParticle.density;
             
             divV += m_dens * dot(relVel, gradW);
-            curlV += m_dens * cross(relVel, gradW); // just need one component for magnitude)
+            curlV += m_dens * cross(relVel, gradW);
         }
-        
-        float div = abs(divV);
-        float curlMag = length(curlV);
-        const float eps = 1e-4;
-        
-        particle.balsaraFactor = div / (div + curlMag + eps);
-        ParticleBuffer[id.x] = particle;
     }
+    
+    float div = abs(divV);
+    float curlMag = length(curlV);
+    const float eps = 1e-4;
+        
+    particle.balsaraFactor = div / (div + curlMag + eps);
+    particle.divV = div;
+    ParticleBuffer[id.x] = particle;
 }
 
 // kernel 4
+// calculate the adaptive timestep
+[numthreads(threadCount, 1, 1)]
+void CalculateAdaptiveTimestep(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    ParticleData particle = ParticleBuffer[id.x];
+    
+    float smoothRad = particle.smoothingRadius;
+    float densFactor = pow(abs(particle.density), adiabaticIndex - 1);
+    float soundSpeed = sqrt(adiabaticIndex * particle.entropy * densFactor);
+    float divV = abs(particle.divV);
+    
+    // calculate the three criteria for the timestep
+    // sound speed, viscosity and conduction all contribute to stability limits in the timestep
+    float sound_dt = smoothRad / (soundSpeed + 1e-6);
+    float visc_dt = smoothRad / (viscAlpha * soundSpeed + viscBeta * smoothRad * divV + 1e-6);
+    float cond_dt = (smoothRad * smoothRad) / (conductionCoefficient + 1e-6);
+    
+    // get the minimum dt from the three criteria and store it
+    float local_dt = CFL * min(sound_dt, min(visc_dt, cond_dt));
+    DeltaTimeBuffer[id.x] = local_dt;
+}
+
+// kernel 5
 // calculate fusion rates and mass weights
 [numthreads(threadCount, 1, 1)]
 void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
@@ -541,7 +573,7 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
     particle.temperature = (protonMass * meanMolecularWeight / boltzmannConstant) * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1);
     
     float fusionRate = CalculateFusionRate(particle.temperature, particle.density, particle.hydroWeight);
-    float hydroChange = fusionRate * deltaTime / energyPerUnitMass;
+    float hydroChange = fusionRate * GlobalDeltaTimeBuffer[0] / energyPerUnitMass;
     
     float hydroWeight = max(particle.hydroWeight - hydroChange, 0.0f);
     float heliumWeight = min(1.0f - hydroWeight, 1.0f);
@@ -553,7 +585,7 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
     DebugBuffer[id.x] = float2(particle.temperature, 0.0f);
 }
 
-// kernel 5
+// kernel 6
 // updates the entropy and calculated the viscosity force for each particle
 [numthreads(threadCount, 1, 1)]
 void UpdateEntropies(uint3 id : SV_DispatchThreadID)
@@ -641,7 +673,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    float change = (viscTerm + condTerm) * deltaTime;
+    float change = (viscTerm + condTerm) * GlobalDeltaTimeBuffer[0];
     change += ApplyCooling(particle.entropy, particle.density);
     particle.entropy += change;
     
@@ -649,7 +681,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
 }
 
-// kernel 6
+// kernel 7
 // calculates the gravity force between the particles
 [numthreads(threadCount,1,1)]
 void CalculateGravity(uint3 id : SV_DispatchThreadID)
@@ -666,7 +698,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += gravityAccel;
 }
 
-// kernel 7
+// kernel 8
 // Calculates the pressure correction for smoothing radius changes
 [numthreads(threadCount, 1, 1)]
 void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
@@ -723,7 +755,7 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
     ParticleBuffer[id.x] = particle;
 }
 
-// kernel 8
+// kernel 9
 // calculates the pressure force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
@@ -774,7 +806,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     ResultantForces[id.x] += pressureForce * pressureMultiplier;
 }
 
-// kernel 9
+// kernel 10
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
@@ -782,7 +814,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     
     ParticleData particle = ParticleBuffer[id.x];
-    particle.velocity += ResultantForces[id.x] * deltaTime;
+    particle.velocity += ResultantForces[id.x] * GlobalDeltaTimeBuffer[0];
     
     // XSPH is a velocity smoothing technique that helps reduce numerical instabilities
     if (useXSPH)
@@ -827,11 +859,11 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
         particle.velocity += (eps * xsph);
     }
     
-    particle.position += particle.velocity * deltaTime;
+    particle.position += particle.velocity * GlobalDeltaTimeBuffer[0];
     ParticleBuffer[id.x] = HandleCollisions(particle);
 }
 
-// kernel 10
+// kernel 11
 // run once at the start of the simulation to set the inital entropy values
 [numthreads(threadCount, 1, 1)]
 void InitialiseEntropy(uint3 id : SV_DispatchThreadID)
