@@ -14043,20 +14043,20 @@ MonoBehaviour:
   display: {fileID: 1749289515}
   octreeManager: {fileID: 951483483}
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
-  CFLScale: 0
+  CFLScale: 0.8
   damping: 0.8
   pressureMultiplier: 0.2
   viscocityMultiplier: 0.1
   gasConstant: 1
   adiabaticIndex: 1.4
   useXSPH: 1
-  isPaused: 1
+  isPaused: 0
   minFactor: 0.75
   spatialStage1Size: 0.5
   spatialStage2Size: 0.75
   spatialStage3Size: 1
   useDynamicSmoothingRadius: 1
-  gravity: 0.8
+  gravity: 1
   particleMass: 0.1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01
@@ -14068,8 +14068,8 @@ MonoBehaviour:
   coolingAlpha: 0.001
   coolingSubcycles: 4
   conductionCoefficient: 1
-  viscosityAlpha: 0.001
-  viscosityBeta: 0.002
+  viscosityAlpha: 1
+  viscosityBeta: 2
   viscosityEpsilon: 0.00000001
   temperatureThreshold: 100
   rateCoefficient: 0.5
@@ -14244,9 +14244,9 @@ MonoBehaviour:
   velocityDisplayMax: 6
   energyDisplayMin: 27
   energyDisplayMax: 32
-  temperatureDisplayMin: 45
-  temperatureDisplayMax: 55
-  displayMode: 0
+  temperatureDisplayMin: 150
+  temperatureDisplayMax: 300
+  displayMode: 3
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

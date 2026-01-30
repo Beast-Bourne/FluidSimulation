@@ -1,0 +1,39 @@
+#pragma kernel Reduction
+
+RWStructuredBuffer<float> Input;
+RWStructuredBuffer<float> Output;
+
+const uint inputSize;
+
+groupshared float minDt[256]; // an empty array shared between threads in a single group (size is set to be equal to the number of threads per group)
+
+// kernel 0
+// performs a reduction on spatial data (for finding the minimum value in a buffer)
+// id: the global thread ID (when dispatched for 1000 threads, id.x goes from 0 to 999)
+// gid: the group ID (when dispatched for 1000 threads its split into 1000/256 (rounded up gives 4) groups. gid gives the group number (0 to 3)
+// tid: the thread ID within the group (when dispatched for 256 threads per group, tid.x goes from 0 to 255)
+// the number of threads per group is defined in the [numthreads(x,y,z)] attribute below
+[numthreads(256,1,1)]
+void Reduction (uint3 id : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
+{
+    float dt = (id.x < inputSize)? Input[id.x] : 1e10f;
+    minDt[tid.x] = dt;
+    
+    // ensure all threads have written to shared memory before proceeding
+    GroupMemoryBarrierWithGroupSync();
+    
+    // a parallel sort to find the minimum value in the shared memory array
+    // >>= 1 is a bit-shift right operation, equivalent to dividing by 2 (only for powers of two)
+    // meaning this runs for stride = 128, 64, 32, 16, 8, 4, 2, 1
+    for (uint stride = 128; stride > 0; stride >>= 1)
+    {
+        if (tid.x < stride)
+        {
+            minDt[tid.x] = min(minDt[tid.x], minDt[tid.x + stride]);
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    
+    // the first thread in the group writes the result to the output buffer
+    if (tid.x == 0) Output[gid.x] = minDt[0];
+}

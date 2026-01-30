@@ -191,6 +191,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         // ADAPTIVE DELTA TIME
         ComputeHelper.Dispatch(compute, particleCount, deltaTimeKernel);
+        timestepManager.PerformReduction();
 
         // FUSION
         ComputeHelper.Dispatch(compute, particleCount, fusionKernel);
@@ -293,7 +294,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         particleBuffer.SetData(allParticles);
 
         // temporary to test delta time buffer
-        float[] deltaT = new float[1] { 0.00694f };
+        float[] deltaT = new float[1] { 0.0f };
         globalDeltaTimeBuffer.SetData(deltaT);
     }
 
@@ -350,6 +351,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     private void OnDestroy()
     {
         ComputeHelper.Release(particleBuffer, OctreeBuffer, SpatialHashes, debugBuffer, ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer);
+        timestepManager.ReleaseBuffers();
     }
 }
 
