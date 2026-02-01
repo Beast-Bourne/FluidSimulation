@@ -316,14 +316,16 @@ public class NebulaParticleSimulator : MonoBehaviour
         float2[] debugData = new float2[particleCount];
         debugBuffer.GetData(debugData);
 
-        float highestRate = 0.0f;
+        float highestTemp = float.MinValue;
+        float avgTemp = 0.0f;
         for (int i = 0; i < debugData.Length; i++)
         {
-            highestRate += debugData[i].x;
+            avgTemp += debugData[i].x;
+            if (debugData[i].x > highestTemp)
+                highestTemp = debugData[i].x;
         }
-
-        highestRate /= debugData.Length;
-        Debug.Log("average temp: " + highestRate);
+        avgTemp /= debugData.Length;
+        Debug.Log($"Average Temperature: {avgTemp}     Highest temp: {highestTemp}");
     }
 
     private void OnApplicationQuit()

@@ -74,7 +74,8 @@ public class TimestepManager
         }
         else
         {
-            float finalDt = Mathf.Clamp(newDt, 0.5f*oldDt, 1.2f*oldDt);
+            float finalDt = Mathf.Clamp(newDt, 0.75f*oldDt, 1.2f*oldDt);
+            finalDt = Mathf.Min(finalDt, Time.deltaTime);
             float[] final = new float[1] { finalDt };
             Result.SetData(final);
         }

@@ -517,7 +517,7 @@ void CalculateBalsaraFactor(uint3 id : SV_DispatchThreadID)
             if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
             
             float dist = sqrt(sqrDistToAdj);
-            float3 dirToAdj = offsetToAdj / (dist + 1e-6);
+            float3 dirToAdj = offsetToAdj / max(dist, 1e-6);
             
             float3 relVel = adjParticle.velocity - particle.velocity;
             float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
@@ -582,7 +582,7 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
     particle.hydroWeight = hydroWeight;
     particle.meanMolecularWeight = meanMolecularWeight;
     ParticleBuffer[id.x] = particle;
-    DebugBuffer[id.x] = float2(particle.temperature, 0.0f);
+    DebugBuffer[id.x] = float2(particle.temperature, fusionRate);
 }
 
 // kernel 6
@@ -628,7 +628,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
             if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
             
             float dist = sqrt(sqrDistToAdj);
-            float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
+            float3 dirToAdj = offsetToAdj / max(dist, 1e-6);
             
             // compute needed properties
             float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
@@ -663,10 +663,11 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
                 float avgBalsara = 0.5f * (particle.balsaraFactor + adjParticle.balsaraFactor);
                 float artVisc = avgBalsara * (-viscAlpha * avgSoundSpeed * massFactor + viscBeta * massFactor * massFactor) / avgDensity;
             
-                float3 forceTerm = -0.5 * particleMass * artVisc * gradW;
+                float3 forceTerm = -1.0f * particleMass * artVisc * gradW;
                 viscosityForce += forceTerm;
                 
-                float viscosityTerm = 0.5 * particleMass * artVisc * velDivTerm;
+                float compWork = min(velDivTerm, 0.0);
+                float viscosityTerm = -1.0f * particleMass * artVisc * compWork;
                 float entropyConvert = (adiabaticIndex - 1) / pow(abs(particle.density), adiabaticIndex);
                 viscTerm += (viscosityTerm * entropyConvert);
             }
@@ -795,7 +796,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             if (sqrtDistToAdj > avgSmoothRad * avgSmoothRad) continue;
             
             float dist = sqrt(sqrtDistToAdj);
-            float3 dirToAdj = (dist > 0) ? offsetToAdj / dist : float3(0, 1, 0);
+            float3 dirToAdj = offsetToAdj / max(dist, 1e-6);
             
             // calculate the pressure force contribution from this neighbour particle
             float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
