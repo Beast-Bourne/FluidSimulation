@@ -106,13 +106,12 @@ const float softeningLength;
 // smoothing and pressure constants
 const float pressureMultiplier;
 const bool useXSPH;
-const float gasConstant;
 const float adiabaticIndex;
 const bool useDynamicSmoothingRadius;
 
 // energy constants
+const float initialTemperature;
 const float protonMass;
-const float meanMolecularWeight;
 const float boltzmannConstant;
 const float coolingLambda;
 const float coolingAlpha;
@@ -279,7 +278,7 @@ float LambdaFunction(float temp)
     return coolingLambda * pow(abs(temp), coolingAlpha);
 }
 
-float ApplyCooling(float entropy, float dens)
+float ApplyCooling(float entropy, float dens, float meanMolecularWeight)
 {
     float originEntropy = entropy;
     float mu_mp = meanMolecularWeight * protonMass;
@@ -570,7 +569,7 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
     ParticleData particle = ParticleBuffer[id.x];
     
     // calculate temperature this frame
-    particle.temperature = (protonMass * meanMolecularWeight / boltzmannConstant) * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1);
+    particle.temperature = (protonMass * particle.meanMolecularWeight / boltzmannConstant) * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1);
     
     float fusionRate = CalculateFusionRate(particle.temperature, particle.density, particle.hydroWeight);
     float hydroChange = fusionRate * GlobalDeltaTimeBuffer[0] / energyPerUnitMass;
@@ -582,7 +581,7 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
     particle.hydroWeight = hydroWeight;
     particle.meanMolecularWeight = meanMolecularWeight;
     ParticleBuffer[id.x] = particle;
-    DebugBuffer[id.x] = float2(particle.temperature, fusionRate);
+    DebugBuffer[id.x] = float2(0.0f, particle.temperature);
 }
 
 // kernel 6
@@ -666,16 +665,17 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
                 float3 forceTerm = -1.0f * particleMass * artVisc * gradW;
                 viscosityForce += forceTerm;
                 
-                float compWork = min(velDivTerm, 0.0);
-                float viscosityTerm = -1.0f * particleMass * artVisc * compWork;
+                float compWork = max(velDivTerm, 0.0);
+                float viscosityTerm = 1.0f * particleMass * artVisc * compWork;
                 float entropyConvert = (adiabaticIndex - 1) / pow(abs(particle.density), adiabaticIndex);
-                viscTerm += (viscosityTerm * entropyConvert);
+                float entropyChange = min((viscosityTerm * entropyConvert) * viscocityMultiplier, 50.0f);
+                viscTerm += entropyChange;
             }
         }
     }
 
     float change = (viscTerm + condTerm) * GlobalDeltaTimeBuffer[0];
-    change += ApplyCooling(particle.entropy, particle.density);
+    change += ApplyCooling(particle.entropy, particle.density, particle.meanMolecularWeight);
     particle.entropy += change;
     
     ParticleBuffer[id.x] = particle;
@@ -873,8 +873,7 @@ void InitialiseEntropy(uint3 id : SV_DispatchThreadID)
     
     ParticleData particle = ParticleBuffer[id.x];
     
-    const float initialTemp = 50.0f; // Kelvin
-    float entropy = ((boltzmannConstant * initialTemp) / (protonMass * meanMolecularWeight)) * pow(abs(particle.density), 1 - adiabaticIndex);
+    float entropy = ((boltzmannConstant * initialTemperature) / (protonMass * particle.meanMolecularWeight)) * pow(abs(particle.density), 1 - adiabaticIndex);
 
     particle.entropy = entropy;
     ParticleBuffer[id.x] = particle;

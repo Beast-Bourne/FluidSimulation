@@ -35,7 +35,6 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float damping;
     public float pressureMultiplier;
     public float viscocityMultiplier;
-    public float gasConstant;
     public float adiabaticIndex;
     public bool useXSPH;
     public bool isPaused;
@@ -57,7 +56,6 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float InitialTemperature;
     public float BoltzmannConstant;
     public float ProtonMass;
-    public float MeanMolecularWeight;
     public float coolingLambda;
     public float coolingAlpha;
     public int coolingSubcycles;
@@ -104,7 +102,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     // Initialisation. Gets the spawn data from the spawner and sets the initial buffer data before telling the display to initialise
     private void Start()
     {
-        spawnData = spawner.GetSpawnData(adiabaticIndex, InitialTemperature, BoltzmannConstant, ProtonMass, MeanMolecularWeight);
+        spawnData = spawner.GetSpawnData();
         particleCount = spawnData.positions.Length;
         particleBuffer = ComputeHelper.CreateStructuredBuffer<ParticleData>(particleCount);
         OctreeBuffer = ComputeHelper.CreateStructuredBuffer<OctreeNode>(octreeManager.NumOfNodes);
@@ -121,7 +119,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
-        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", fusionKernel);
+        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", fusionKernel, updateEntropyKernel);
         ComputeHelper.SetBuffer(compute, deltaTimeBuffer, "DeltaTimeBuffer", deltaTimeKernel);
         ComputeHelper.SetBuffer(compute, globalDeltaTimeBuffer, "GlobalDeltaTimeBuffer", deltaTimeKernel, fusionKernel, updateEntropyKernel, updatePositionKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, updateEntropyKernel);
@@ -228,12 +226,11 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("pressureMultiplier", pressureMultiplier);
         compute.SetBool("useXSPH", useXSPH);
         compute.SetFloat("viscocityMultiplier", viscocityMultiplier);
-        compute.SetFloat("gasConstant", gasConstant);
         compute.SetFloat("adiabaticIndex", adiabaticIndex);
         compute.SetBool("useDynamicSmoothingRadius", useDynamicSmoothingRadius);
 
+        compute.SetFloat("initialTemperature", InitialTemperature);
         compute.SetFloat("protonMass", ProtonMass);
-        compute.SetFloat("meanMolecularWeight", MeanMolecularWeight);
         compute.SetFloat("boltzmannConstant", BoltzmannConstant);
         compute.SetFloat("coolingLambda", coolingLambda);
         compute.SetFloat("coolingAlpha", coolingAlpha);
@@ -286,7 +283,7 @@ public class NebulaParticleSimulator : MonoBehaviour
                 divV = 0.0f,
                 temperature = InitialTemperature,
                 hydroWeight = 1.0f,
-                meanMolecularWeight = 0.0f
+                meanMolecularWeight = 0.5f // assume pure hydrogen initially
             };
             allParticles[i] = particle;
         }
@@ -318,14 +315,15 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         float highestTemp = float.MinValue;
         float avgTemp = 0.0f;
+        float lowestTemp = float.MaxValue;
         for (int i = 0; i < debugData.Length; i++)
         {
-            avgTemp += debugData[i].x;
-            if (debugData[i].x > highestTemp)
-                highestTemp = debugData[i].x;
+            avgTemp += debugData[i].y;
+            if (debugData[i].y > highestTemp) highestTemp = debugData[i].y;
+            if (debugData[i].y < lowestTemp) lowestTemp = debugData[i].y;
         }
         avgTemp /= debugData.Length;
-        Debug.Log($"Average Temperature: {avgTemp}     Highest temp: {highestTemp}");
+        Debug.Log($"average temp: {avgTemp}     Highest temp: {highestTemp}     Lowest temp: {lowestTemp}");
     }
 
     private void OnApplicationQuit()

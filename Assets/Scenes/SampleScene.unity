@@ -14045,9 +14045,8 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   CFLScale: 0.8
   damping: 0.8
-  pressureMultiplier: 0.3
+  pressureMultiplier: 0.275
   viscocityMultiplier: 0.05
-  gasConstant: 1
   adiabaticIndex: 1.4
   useXSPH: 1
   isPaused: 0
@@ -14056,22 +14055,21 @@ MonoBehaviour:
   spatialStage2Size: 0.75
   spatialStage3Size: 1
   useDynamicSmoothingRadius: 1
-  gravity: 1.2
-  particleMass: 0.1
+  gravity: 1
+  particleMass: 0.65
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01
   InitialTemperature: 50
   BoltzmannConstant: 0.05
   ProtonMass: 0.09
-  MeanMolecularWeight: 2.3
-  coolingLambda: 0.001
-  coolingAlpha: 0.001
+  coolingLambda: 0
+  coolingAlpha: 0
   coolingSubcycles: 4
-  conductionCoefficient: 0.5
+  conductionCoefficient: 0.3
   viscosityAlpha: 2
   viscosityBeta: 4
   viscosityEpsilon: 0.00000001
-  temperatureThreshold: 100
+  temperatureThreshold: 1e+12
   rateCoefficient: 0.5
   energyPerUnitMass: 6.3e+14
   enableDataCollection: 0
@@ -14243,9 +14241,9 @@ MonoBehaviour:
   velocityDisplayMin: 0
   velocityDisplayMax: 6
   energyDisplayMin: 27
-  energyDisplayMax: 40
+  energyDisplayMax: 80
   temperatureDisplayMin: 40
-  temperatureDisplayMax: 70
+  temperatureDisplayMax: 100
   displayMode: 3
 --- !u!1 &1810665982
 GameObject:

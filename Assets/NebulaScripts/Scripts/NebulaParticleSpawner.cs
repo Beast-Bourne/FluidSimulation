@@ -15,7 +15,7 @@ public class NebulaParticleSpawner : MonoBehaviour
 
     // This function generates the spawn data for particles in a 3D bounds
     // it applies jitter so they particles arent in a uniform grid
-    public ParticleSpawnData GetSpawnData(float adiabaticIndex, float InitialTemp, float boltzmannConst, float protonMass, float MeanMolecularWeight)
+    public ParticleSpawnData GetSpawnData()
     {
         ParticleSpawnData data = new ParticleSpawnData(particlesPerSide * particlesPerSide * particlesPerSide);
 
