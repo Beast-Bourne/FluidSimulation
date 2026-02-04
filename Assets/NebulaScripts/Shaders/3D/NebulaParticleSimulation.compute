@@ -740,14 +740,14 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
             float dist = sqrt(sqrDist);
             float W = Influence(dist, smoothRad);
             float dw_dr = DerivativeInfluence(dist, smoothRad);
-            float dw_dh = (-3.0f * W / smoothRad) + (dist * dw_dr / smoothRad);
+            float dw_dh = (3.0f * W / smoothRad) + (dist * dw_dr / smoothRad);
             sum_dW_dh += particleMass * dw_dh;
         }
     }
     
     float density = particle.density;
     float densityTerm = smoothRad / (3.0f * density);
-    float newCorrection = 1.0f + (densityTerm * sum_dW_dh);
+    float newCorrection = 1.0f - (densityTerm * sum_dW_dh);
     newCorrection = clamp(newCorrection, 0.2f, 2.0f);
     
     float pressure = particle.entropy * pow(abs(particle.density), adiabaticIndex);

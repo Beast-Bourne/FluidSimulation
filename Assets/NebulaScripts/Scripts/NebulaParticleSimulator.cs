@@ -249,7 +249,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("stage3Size", spatialStage3Size);
         compute.SetFloat("minSizeFactor", minFactor);
 
-        compute.SetFloat("sigma", 8 / Mathf.PI);
+        compute.SetFloat("sigma", 1 / Mathf.PI);
 
         ShowDebugData();
     }
