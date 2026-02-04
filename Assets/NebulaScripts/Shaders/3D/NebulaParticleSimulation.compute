@@ -14,7 +14,7 @@
 
 // Includes
 #include "../GridHelper.hlsl"
-#include "../ShaderMaths.hlsl"
+#include "../InfluenceKernels.hlsl"
 
 struct ParticleData
 {
@@ -356,7 +356,7 @@ float CalculateParticlesDensity(float3 pos, float smoothRad)
             if (sqrDist > smoothRad * smoothRad) continue; // if the particle is outside the smoothing radius then skip it
             
             float dist = sqrt(sqrDist);
-            density += (CubicSplineInfluence(dist, smoothRad) * particleMass);
+            density += (Influence(dist, smoothRad) * particleMass);
         }
     }
     
@@ -520,7 +520,7 @@ void CalculateBalsaraFactor(uint3 id : SV_DispatchThreadID)
             float3 dirToAdj = offsetToAdj / max(dist, 1e-6);
             
             float3 relVel = adjParticle.velocity - particle.velocity;
-            float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
+            float3 gradW = DerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
             float m_dens = particleMass / adjParticle.density;
             
             divV += m_dens * dot(relVel, gradW);
@@ -631,7 +631,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
             float3 dirToAdj = offsetToAdj / max(dist, 1e-6);
             
             // compute needed properties
-            float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
+            float3 gradW = DerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
             
             float densFactor = pow(abs(particle.density), adiabaticIndex - 1);
             float adjDensFactor = pow(abs(adjParticle.density), adiabaticIndex - 1);
@@ -645,7 +645,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
             
             // conduction heating term
             float tempDiff = particle.temperature - adjParticle.temperature;
-            float conductionFlux = (conductionCoefficient * tempDiff * CubicSplineDerivativeInfluence(dist, avgSmoothRad) * particleMass);
+            float conductionFlux = (conductionCoefficient * tempDiff * DerivativeInfluence(dist, avgSmoothRad) * particleMass);
             float entropyFactor = (adiabaticIndex - 1) / avgDensFactor;
             condTerm += (conductionFlux * entropyFactor);
             
@@ -738,8 +738,8 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
             if (sqrDist > smoothRad * smoothRad) continue;
             
             float dist = sqrt(sqrDist);
-            float W = CubicSplineInfluence(dist, smoothRad);
-            float dw_dr = CubicSplineDerivativeInfluence(dist, smoothRad);
+            float W = Influence(dist, smoothRad);
+            float dw_dr = DerivativeInfluence(dist, smoothRad);
             float dw_dh = (-3.0f * W / smoothRad) + (dist * dw_dr / smoothRad);
             sum_dW_dh += particleMass * dw_dh;
         }
@@ -800,8 +800,8 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             float3 dirFromAdj = offsetFromAdj / max(dist, 1e-6);
             
             // calculate the pressure force contribution from this neighbour particle
-            float3 gradW = CubicSplineDerivativeInfluence(dist, smoothRad) * dirFromAdj;
-            float3 adjGradW = CubicSplineDerivativeInfluence(dist, adjParticle.smoothingRadius) * dirFromAdj;
+            float3 gradW = DerivativeInfluence(dist, smoothRad) * dirFromAdj;
+            float3 adjGradW = DerivativeInfluence(dist, adjParticle.smoothingRadius) * dirFromAdj;
             pressureForce += -particleMass * ((particle.pressureCorrection * gradW) + (adjParticle.pressureCorrection * adjGradW));
         }
     }
@@ -854,7 +854,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
                 if (sqrDist > avgSmoothRad * avgSmoothRad) continue;
 
                 float dist = sqrt(sqrDist);
-                float w = CubicSplineInfluence(dist, avgSmoothRad); // normal density kernel
+                float w = Influence(dist, avgSmoothRad); // normal density kernel
 
                 xsph += (adjParticle.velocity - particle.velocity) * w * (particleMass / adjParticle.density);
             }

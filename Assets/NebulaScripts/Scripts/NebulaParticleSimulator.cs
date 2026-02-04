@@ -249,13 +249,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("stage3Size", spatialStage3Size);
         compute.SetFloat("minSizeFactor", minFactor);
 
-        compute.SetFloat("Pow2Factor", 6 / (Mathf.PI * Mathf.Pow(spatialStage1Size, 4)));
-        compute.SetFloat("Pow2DerivativeFactor", 12 / (Mathf.PI * Mathf.Pow(spatialStage1Size, 4)));
-        compute.SetFloat("Pow3Factor", 10 / (Mathf.PI * Mathf.Pow(spatialStage1Size, 5)));
-        compute.SetFloat("Pow3DerivativeFactor", 30 / (Mathf.PI * Mathf.Pow(spatialStage1Size, 5)));
-        compute.SetFloat("PolynomialPow6Factor", 4 / (Mathf.PI * Mathf.Pow(spatialStage1Size, 8)));
-
-        compute.SetFloat("CubicSplineFactor", 3 / (4*spatialStage1Size));
+        compute.SetFloat("sigma", 8 / Mathf.PI);
 
         ShowDebugData();
     }

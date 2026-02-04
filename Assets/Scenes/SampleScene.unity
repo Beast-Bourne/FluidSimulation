@@ -14244,7 +14244,7 @@ MonoBehaviour:
   energyDisplayMax: 80
   temperatureDisplayMin: 40
   temperatureDisplayMax: 100
-  displayMode: 3
+  displayMode: 0
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0
