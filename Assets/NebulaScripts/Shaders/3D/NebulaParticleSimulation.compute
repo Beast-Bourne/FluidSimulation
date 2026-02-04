@@ -326,6 +326,8 @@ float GetTargetSmoothRad(float density)
 
 }
 
+// NOTE: Maybe test the difference between density using 'h' and 'average h'
+// density doesn't need to be symetrical since its a scalar but since its used in force calculations i think it might affect stability
 float CalculateParticlesDensity(float3 pos, float smoothRad)
 {
     int3 originGridPos = GetGridPos3D(pos, GetTargetLayerSize(smoothRad));
@@ -348,13 +350,12 @@ float CalculateParticlesDensity(float3 pos, float smoothRad)
             
             uint adjacentIndex = indexData[0];
             
-            float3 adjacentPos = ParticleBuffer[adjacentIndex].predictedPos;
-            float3 offsetToAdjacent = adjacentPos - pos;
-            float sqrDistToAdjacent = dot(offsetToAdjacent, offsetToAdjacent);
+            float3 offsetFromAdjacent = pos - ParticleBuffer[adjacentIndex].predictedPos;
+            float sqrDist = dot(offsetFromAdjacent, offsetFromAdjacent);
             
-            if (sqrDistToAdjacent > smoothRad * smoothRad) continue; // if the particle is outside the smoothing radius then skip it
+            if (sqrDist > smoothRad * smoothRad) continue; // if the particle is outside the smoothing radius then skip it
             
-            float dist = sqrt(sqrDistToAdjacent);
+            float dist = sqrt(sqrDist);
             density += (CubicSplineInfluence(dist, smoothRad) * particleMass);
         }
     }
@@ -581,7 +582,7 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
     particle.hydroWeight = hydroWeight;
     particle.meanMolecularWeight = meanMolecularWeight;
     ParticleBuffer[id.x] = particle;
-    DebugBuffer[id.x] = float2(0.0f, particle.temperature);
+    DebugBuffer[id.x] = float2(particle.temperature, particle.entropy);
 }
 
 // kernel 6
@@ -668,7 +669,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
                 float compWork = max(velDivTerm, 0.0);
                 float viscosityTerm = 1.0f * particleMass * artVisc * compWork;
                 float entropyConvert = (adiabaticIndex - 1) / pow(abs(particle.density), adiabaticIndex);
-                float entropyChange = min((viscosityTerm * entropyConvert) * viscocityMultiplier, 50.0f);
+                float entropyChange = min((viscosityTerm * entropyConvert) * viscocityMultiplier, 100.0f);
                 viscTerm += entropyChange;
             }
         }
@@ -731,22 +732,22 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
             
             ParticleData adjParticle = ParticleBuffer[adjIndex];
             
-            float3 offsetToAdj = particle.predictedPos - adjParticle.predictedPos;
-            float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
+            float3 offsetFromAdj = particle.predictedPos - adjParticle.predictedPos;
+            float sqrDist = dot(offsetFromAdj, offsetFromAdj);
             
-            if (sqrDistToAdj > smoothRad * smoothRad) continue;
+            if (sqrDist > smoothRad * smoothRad) continue;
             
-            float distToAdj = sqrt(sqrDistToAdj);
-            float W = CubicSplineInfluence(distToAdj, smoothRad);
-            float dw_dr = CubicSplineDerivativeInfluence(distToAdj, smoothRad);
-            float dw_dh = (-3.0f * W / smoothRad) + (distToAdj * dw_dr / smoothRad);
+            float dist = sqrt(sqrDist);
+            float W = CubicSplineInfluence(dist, smoothRad);
+            float dw_dr = CubicSplineDerivativeInfluence(dist, smoothRad);
+            float dw_dh = (-3.0f * W / smoothRad) + (dist * dw_dr / smoothRad);
             sum_dW_dh += particleMass * dw_dh;
         }
     }
     
     float density = particle.density;
-    float densityTerm = -smoothRad / (3.0f * density);
-    float newCorrection = 1.0f - (densityTerm * sum_dW_dh);
+    float densityTerm = smoothRad / (3.0f * density);
+    float newCorrection = 1.0f + (densityTerm * sum_dW_dh);
     newCorrection = clamp(newCorrection, 0.2f, 2.0f);
     
     float pressure = particle.entropy * pow(abs(particle.density), adiabaticIndex);
@@ -788,19 +789,20 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             
             ParticleData adjParticle = ParticleBuffer[adjIndex];
             
-            float3 offsetToAdj = particle.predictedPos - adjParticle.predictedPos;
-            float sqrtDistToAdj = dot(offsetToAdj, offsetToAdj);
+            float3 offsetFromAdj = particle.predictedPos - adjParticle.predictedPos;
+            float sqrtDistToAdj = dot(offsetFromAdj, offsetFromAdj);
             
             // use average smoothing radius since this is a pairwise interaction
             float avgSmoothRad = 0.5 * (smoothRad + adjParticle.smoothingRadius);
             if (sqrtDistToAdj > avgSmoothRad * avgSmoothRad) continue;
             
             float dist = sqrt(sqrtDistToAdj);
-            float3 dirToAdj = offsetToAdj / max(dist, 1e-6);
+            float3 dirFromAdj = offsetFromAdj / max(dist, 1e-6);
             
             // calculate the pressure force contribution from this neighbour particle
-            float3 gradW = CubicSplineDerivativeInfluence(dist, avgSmoothRad) * dirToAdj;
-            pressureForce += -particleMass * gradW * (particle.pressureCorrection + adjParticle.pressureCorrection);
+            float3 gradW = CubicSplineDerivativeInfluence(dist, smoothRad) * dirFromAdj;
+            float3 adjGradW = CubicSplineDerivativeInfluence(dist, adjParticle.smoothingRadius) * dirFromAdj;
+            pressureForce += -particleMass * ((particle.pressureCorrection * gradW) + (adjParticle.pressureCorrection * adjGradW));
         }
     }
     

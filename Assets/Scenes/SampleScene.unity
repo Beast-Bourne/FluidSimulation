@@ -14045,7 +14045,7 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   CFLScale: 0.8
   damping: 0.8
-  pressureMultiplier: 0.275
+  pressureMultiplier: 0.4
   viscocityMultiplier: 0.05
   adiabaticIndex: 1.4
   useXSPH: 1
@@ -14055,8 +14055,8 @@ MonoBehaviour:
   spatialStage2Size: 0.75
   spatialStage3Size: 1
   useDynamicSmoothingRadius: 1
-  gravity: 1
-  particleMass: 0.65
+  gravity: 0.9
+  particleMass: 1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01
   InitialTemperature: 50
@@ -14236,8 +14236,8 @@ MonoBehaviour:
     m_NumColorKeys: 4
     m_NumAlphaKeys: 2
   gradientResolution: 50
-  densityDisplayMin: 0.07
-  densityDisplayMax: 0.15
+  densityDisplayMin: 0.75
+  densityDisplayMax: 1.5
   velocityDisplayMin: 0
   velocityDisplayMax: 6
   energyDisplayMin: 27

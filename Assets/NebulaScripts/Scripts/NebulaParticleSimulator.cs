@@ -119,7 +119,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
-        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", fusionKernel, updateEntropyKernel);
+        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", fusionKernel);
         ComputeHelper.SetBuffer(compute, deltaTimeBuffer, "DeltaTimeBuffer", deltaTimeKernel);
         ComputeHelper.SetBuffer(compute, globalDeltaTimeBuffer, "GlobalDeltaTimeBuffer", deltaTimeKernel, fusionKernel, updateEntropyKernel, updatePositionKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, updateEntropyKernel);
@@ -316,14 +316,25 @@ public class NebulaParticleSimulator : MonoBehaviour
         float highestTemp = float.MinValue;
         float avgTemp = 0.0f;
         float lowestTemp = float.MaxValue;
+
+        float highestEntropy = float.MinValue;
+        float avgEntropy = 0.0f;
+        float lowestEntropy = 0.0f;
+
         for (int i = 0; i < debugData.Length; i++)
         {
-            avgTemp += debugData[i].y;
-            if (debugData[i].y > highestTemp) highestTemp = debugData[i].y;
-            if (debugData[i].y < lowestTemp) lowestTemp = debugData[i].y;
+            avgTemp += debugData[i].x;
+            if (debugData[i].x > highestTemp) highestTemp = debugData[i].x;
+            if (debugData[i].x < lowestTemp) lowestTemp = debugData[i].x;
+
+            avgEntropy += debugData[i].y;
+            if ( debugData[i].y > highestEntropy) highestEntropy = debugData[i].y;
+            if (debugData[i].y < lowestEntropy) lowestEntropy = debugData[i].y;
         }
         avgTemp /= debugData.Length;
+        avgEntropy /= debugData.Length;
         Debug.Log($"average temp: {avgTemp}     Highest temp: {highestTemp}     Lowest temp: {lowestTemp}");
+        Debug.Log($"average entropy: {avgEntropy}     Highest entropy: {highestEntropy}     Lowest entropy: {lowestEntropy}");
     }
 
     private void OnApplicationQuit()
