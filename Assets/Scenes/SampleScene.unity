@@ -14045,8 +14045,8 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   CFLScale: 0.8
   damping: 0.8
-  pressureMultiplier: 2.3
-  viscocityMultiplier: 0.05
+  pressureMultiplier: 1.6
+  viscocityMultiplier: 0.1
   adiabaticIndex: 1.4
   useXSPH: 1
   isPaused: 0
@@ -14236,15 +14236,15 @@ MonoBehaviour:
     m_NumColorKeys: 4
     m_NumAlphaKeys: 2
   gradientResolution: 50
-  densityDisplayMin: 0.1
-  densityDisplayMax: 0.5
-  velocityDisplayMin: 0
-  velocityDisplayMax: 6
-  energyDisplayMin: 60
-  energyDisplayMax: 90
-  temperatureDisplayMin: 40
-  temperatureDisplayMax: 60
-  displayMode: 3
+  densityDisplayMin: 0.05
+  densityDisplayMax: 0.65
+  velocityDisplayMin: 9
+  velocityDisplayMax: 10
+  energyDisplayMin: 80
+  energyDisplayMax: 150
+  temperatureDisplayMin: 50
+  temperatureDisplayMax: 90
+  displayMode: 2
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

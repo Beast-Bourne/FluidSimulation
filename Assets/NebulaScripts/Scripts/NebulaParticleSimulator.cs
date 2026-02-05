@@ -119,9 +119,9 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
-        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", fusionKernel);
+        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", updateEntropyKernel, fusionKernel);
         ComputeHelper.SetBuffer(compute, deltaTimeBuffer, "DeltaTimeBuffer", deltaTimeKernel);
-        ComputeHelper.SetBuffer(compute, globalDeltaTimeBuffer, "GlobalDeltaTimeBuffer", deltaTimeKernel, fusionKernel, updateEntropyKernel, updatePositionKernel);
+        ComputeHelper.SetBuffer(compute, globalDeltaTimeBuffer, "GlobalDeltaTimeBuffer", deltaTimeKernel, fusionKernel, updateEntropyKernel, updatePositionKernel, UpdatePredictionsKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, updateEntropyKernel);
         ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel);
         ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel);
@@ -261,9 +261,12 @@ public class NebulaParticleSimulator : MonoBehaviour
         System.Array.Copy(spawnData.positions, allPoints, spawnData.positions.Length);
 
         ParticleData[] allParticles = new ParticleData[particleCount];
+        float2[] debugData = new float2[allParticles.Length];
 
         for (int i = 0; i < allParticles.Length; i++)
         {
+            debugData[i] = new float2(float.MaxValue, 0.0f);
+
             ParticleData particle = new ParticleData
             {
                 position = spawnData.positions[i],
@@ -282,10 +285,12 @@ public class NebulaParticleSimulator : MonoBehaviour
             allParticles[i] = particle;
         }
 
+
         particleBuffer.SetData(allParticles);
+        debugBuffer.SetData(debugData);
 
         // temporary to test delta time buffer
-        float[] deltaT = new float[1] { 0.0f };
+        float[] deltaT = new float[1] { 0.007f };
         globalDeltaTimeBuffer.SetData(deltaT);
     }
 
@@ -307,6 +312,15 @@ public class NebulaParticleSimulator : MonoBehaviour
         float2[] debugData = new float2[particleCount];
         debugBuffer.GetData(debugData);
 
+        for (int i = 0; i < debugData.Length; i++)
+        {
+            if (debugData[i].x < 0.01f)
+            {
+                Debug.Log($"Particle {i} has a smallest dist of {debugData[i].x}");
+            }
+        }
+
+        /*
         float highestTemp = float.MinValue;
         float avgTemp = 0.0f;
         float lowestTemp = float.MaxValue;
@@ -327,8 +341,9 @@ public class NebulaParticleSimulator : MonoBehaviour
         }
         avgTemp /= debugData.Length;
         avgEntropy /= debugData.Length;
-        Debug.Log($"average temp: {avgTemp}     Highest temp: {highestTemp}     Lowest temp: {lowestTemp}");
-        Debug.Log($"average entropy: {avgEntropy}     Highest entropy: {highestEntropy}     Lowest entropy: {lowestEntropy}");
+        Debug.Log($"average temp: {avgTemp}     Highest temp: {highestTemp}     Lowest temp: {lowestTemp} " +
+            $"\n        average entropy: {avgEntropy}     Highest entropy: {highestEntropy}     Lowest entropy: {lowestEntropy}");
+        */
     }
 
     private void OnApplicationQuit()
