@@ -14236,12 +14236,12 @@ MonoBehaviour:
     m_NumColorKeys: 4
     m_NumAlphaKeys: 2
   gradientResolution: 50
-  densityRange: {x: 0.2, y: 0.8}
+  densityRange: {x: 0.2, y: 1}
   velocityRange: {x: 0, y: 2}
-  entropyRange: {x: 80, y: 100}
+  entropyRange: {x: 75, y: 85}
   temperatureRange: {x: 40, y: 70}
   SmoothingRange: {x: 0.25, y: 1}
-  displayMode: 0
+  displayMode: 2
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

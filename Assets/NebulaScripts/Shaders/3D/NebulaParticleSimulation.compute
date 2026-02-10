@@ -328,9 +328,9 @@ uint GetTargetLayer(float smoothRad)
 // NOTE: look into fixing this.
 float GetTargetSmoothRad(float density)
 {
-    const float eta = 1.5f;
+    const float eta = 1.2f;
     const float invDim = 1.0f / 3.0f;
-    return eta * pow(abs(particleMass / density), invDim);
+    return eta * pow(abs(0.3f / density), invDim);
 
 }
 
