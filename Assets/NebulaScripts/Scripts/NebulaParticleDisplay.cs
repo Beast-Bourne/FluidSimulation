@@ -7,7 +7,8 @@ public enum ParticleDisplayMode
     Density = 0,
     Velocity = 1,
     Entropy = 2,
-    Temperature = 3
+    Temperature = 3,
+    SmoothingRadius = 4
 }
 
 public class NebulaParticleDisplay : MonoBehaviour
@@ -26,14 +27,11 @@ public class NebulaParticleDisplay : MonoBehaviour
     [Header("Display Settings")]
     public Gradient colourMap;
     public int gradientResolution;
-    public float densityDisplayMin;
-    public float densityDisplayMax;
-    public float velocityDisplayMin;
-    public float velocityDisplayMax;
-    public float energyDisplayMin;
-    public float energyDisplayMax;
-    public float temperatureDisplayMin;
-    public float temperatureDisplayMax;
+    public Vector2 densityRange;
+    public Vector2 velocityRange;
+    public Vector2 entropyRange;
+    public Vector2 temperatureRange;
+    public Vector2 SmoothingRange;
     public ParticleDisplayMode displayMode;
 
     ComputeBuffer argsBuffer;
@@ -70,15 +68,12 @@ public class NebulaParticleDisplay : MonoBehaviour
             needsUpdate = false;
             TextureFromGradient(ref gradientTexture, gradientResolution, colourMap);
             material.SetTexture("ColourMap", gradientTexture);
-            material.SetFloat("densityMin", densityDisplayMin);
-            material.SetFloat("densityMax", densityDisplayMax);
             material.SetFloat("scale", scale);
-            material.SetFloat("velocityMin", velocityDisplayMin);
-            material.SetFloat("velocityMax", velocityDisplayMax);
-            material.SetFloat("energyMin", energyDisplayMin);
-            material.SetFloat("energyMax", energyDisplayMax);
-            material.SetFloat("tempMin", temperatureDisplayMin);
-            material.SetFloat("tempMax", temperatureDisplayMax);
+            material.SetVector("densityRange", densityRange);
+            material.SetVector("velocityRange", velocityRange);
+            material.SetVector("energyRange", entropyRange);
+            material.SetVector("tempRange", temperatureRange);
+            material.SetVector("smoothingRange", SmoothingRange);
             material.SetInt("displayType", (int)displayMode);
 
             // check if the below can be removed

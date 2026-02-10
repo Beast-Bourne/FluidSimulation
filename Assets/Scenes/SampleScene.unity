@@ -14045,17 +14045,16 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   CFLScale: 0.8
   damping: 0.8
-  pressureMultiplier: 1.6
-  viscocityMultiplier: 0.1
+  pressureMultiplier: 0.9
   adiabaticIndex: 1.4
   useXSPH: 1
   isPaused: 0
-  minFactor: 0.75
+  minFactor: 0.5
   spatialStage1Size: 0.5
   spatialStage2Size: 0.75
   spatialStage3Size: 1
   useDynamicSmoothingRadius: 1
-  gravity: 0.77
+  gravity: 0.3
   particleMass: 1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01
@@ -14066,9 +14065,10 @@ MonoBehaviour:
   coolingAlpha: 0
   coolingSubcycles: 4
   conductionCoefficient: 0.3
-  viscosityAlpha: 2
-  viscosityBeta: 4
-  viscosityEpsilon: 0.00000001
+  viscocityMultiplier: 1
+  alphaMax: 1.5
+  alphaMin: 0.05
+  viscosityEpsilon: 0.01
   temperatureThreshold: 1e+12
   rateCoefficient: 0.5
   energyPerUnitMass: 6.3e+14
@@ -14236,15 +14236,12 @@ MonoBehaviour:
     m_NumColorKeys: 4
     m_NumAlphaKeys: 2
   gradientResolution: 50
-  densityDisplayMin: 0.05
-  densityDisplayMax: 0.65
-  velocityDisplayMin: 9
-  velocityDisplayMax: 10
-  energyDisplayMin: 80
-  energyDisplayMax: 150
-  temperatureDisplayMin: 50
-  temperatureDisplayMax: 90
-  displayMode: 2
+  densityRange: {x: 0.2, y: 0.8}
+  velocityRange: {x: 0, y: 2}
+  entropyRange: {x: 80, y: 100}
+  temperatureRange: {x: 40, y: 70}
+  SmoothingRange: {x: 0.25, y: 1}
+  displayMode: 0
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

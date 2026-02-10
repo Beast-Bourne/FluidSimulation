@@ -29,7 +29,6 @@ Shader "Hidden/Particle3D"
                 float internelEnergy;
                 float pressureCorrection;
                 float balsaraFactor;
-                float divV;
                 float temperature;
                 float hydroWeight;
                 float meanMolecularWeight;
@@ -41,14 +40,11 @@ Shader "Hidden/Particle3D"
             SamplerState linear_clamp_sampler;
             
             float scale;
-            float densityMin;
-            float densityMax;
-            float velocityMin;
-            float velocityMax;
-            float energyMin;
-            float energyMax;
-            float tempMin;
-            float tempMax;
+            float2 densityRange;
+            float2 velocityRange;
+            float2 energyRange;
+            float2 tempRange;
+            float2 smoothingRange;
             int displayType;
 
             float3 colour; // check if this can be removed
@@ -65,25 +61,31 @@ Shader "Hidden/Particle3D"
             v2f vert (appdata_full v, uint instanceID : SV_InstanceID)
             {
                 float density = particles[instanceID].density;
-                float densityT = saturate((density - densityMin) / (densityMax - densityMin));
+                float densityT = saturate((density - densityRange.x) / (densityRange.y - densityRange.x));
                 float colT = densityT;
 
                 if (displayType == 1)
                 {
                     float velocity = length(particles[instanceID].velocity);
-                    float velocityT = saturate((velocity - velocityMin) / (velocityMax - velocityMin));
+                    float velocityT = saturate((velocity - velocityRange.x) / (velocityRange.y - velocityRange.x));
                     colT = velocityT;
                 }
                 else if (displayType == 2)
                 {
                     float energy = particles[instanceID].internelEnergy;
-                    float energyT = saturate((energy - energyMin) / (energyMax - energyMin));
+                    float energyT = saturate((energy - energyRange.x) / (energyRange.y - energyRange.x));
                     colT = energyT;
                 }
                 else if (displayType == 3)
                 {
                     float temperature = particles[instanceID].temperature;
-                    float tempT = saturate((temperature - tempMin) / (tempMax - tempMin));
+                    float tempT = saturate((temperature - tempRange.x) / (tempRange.y - tempRange.x));
+                    colT = tempT;
+                }
+                else if (displayType == 4)
+                {
+                    float smoothing = particles[instanceID].smoothingRadius;
+                    float tempT = saturate((smoothing - smoothingRange.x) / (smoothingRange.y - smoothingRange.x));
                     colT = tempT;
                 }
 
