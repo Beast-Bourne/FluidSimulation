@@ -13924,7 +13924,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
-  spawnSize: 30
+  spawnSize: 36
   VelocitySigma: 1.5
   randomOffsetStrength: 0.5
 --- !u!1 &1374176186
@@ -14049,12 +14049,12 @@ MonoBehaviour:
   adiabaticIndex: 1.4
   useXSPH: 1
   isPaused: 0
-  minFactor: 0.5
-  spatialStage1Size: 0.5
+  minFactor: 1
+  spatialStage1Size: 0.6
   spatialStage2Size: 0.75
   spatialStage3Size: 1
   useDynamicSmoothingRadius: 1
-  gravity: 0.3
+  gravity: 0.33
   particleMass: 1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01
@@ -14067,7 +14067,7 @@ MonoBehaviour:
   conductionCoefficient: 0.3
   viscocityMultiplier: 1
   alphaMax: 1.5
-  alphaMin: 0.05
+  alphaMin: 0
   viscosityEpsilon: 0.01
   temperatureThreshold: 1e+12
   rateCoefficient: 0.5
@@ -14239,9 +14239,9 @@ MonoBehaviour:
   densityRange: {x: 0.2, y: 1}
   velocityRange: {x: 0, y: 2}
   entropyRange: {x: 75, y: 85}
-  temperatureRange: {x: 40, y: 70}
-  SmoothingRange: {x: 0.25, y: 1}
-  displayMode: 2
+  temperatureRange: {x: 40, y: 100}
+  SmoothingRange: {x: 0.6, y: 1}
+  displayMode: 4
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

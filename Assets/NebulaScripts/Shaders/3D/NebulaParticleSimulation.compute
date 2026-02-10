@@ -213,14 +213,13 @@ float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint partic
             uint adjacentIndex = indexData[0];
             if (adjacentIndex == particleIndex) continue; // skips self interaction
             
-            float3 adjacentPos = ParticleBuffer[adjacentIndex].predictedPos;
-            float3 offsetToAdjacent = adjacentPos - particlePos;
-            float distToAdjacent = length(offsetToAdjacent);
-            if (distToAdjacent <= 0) continue; // skips calculations to prevent a divide by zero error
+            float3 offsetFromAdjacent = particlePos - ParticleBuffer[adjacentIndex].predictedPos;
+            float sqrDist = dot(offsetFromAdjacent, offsetFromAdjacent);
+            if (sqrDist <= 0) continue; // skips calculations to prevent a divide by zero error
             
-            float3 dir = offsetToAdjacent / distToAdjacent;
-            float dist = max(distToAdjacent * distToAdjacent + sqrSoftening, 1e-5);
-            float gravMag = gravity * particleMass * pow(distToAdjacent * distToAdjacent + sqrSoftening, -1.5);
+            float dist = sqrt(sqrDist);
+            float3 dir = offsetFromAdjacent / max(dist, softeningLength);
+            float gravMag = -gravity * particleMass * pow(max(sqrDist, sqrSoftening), -1.5);
             gravAccel += dir * gravMag;
         }
     }
@@ -248,16 +247,17 @@ float3 GetGravityAccelFromOctreeChildren(uint parentIndex, float3 particlePos, u
         if (node.mass <= 0) continue; // skips calculations if node has no mass
         
         float3 offset = node.centreOfMass - particlePos;
-        float d = length(offset);
+        float sqrDist = dot(offset, offset);
         
-        if (d <= 0) continue; // skips calculations to prevent a divide by zero error
+        if (sqrDist <= 0) continue; // skips calculations to prevent a divide by zero error
         
         float s = node.size;
+        float dist = sqrt(sqrDist);
         
-        if (s / d < BarnesHutTheta)
+        if (s / dist < BarnesHutTheta)
         {
-            float3 dir = offset / d;
-            float accelMag = gravity * node.mass * pow(d * d + sqrSoftening, -1.5);
+            float3 dir = offset / max(dist, softeningLength);
+            float accelMag = gravity * node.mass * pow(max(sqrDist, sqrSoftening), -1.5);
             gravAccel += dir * accelMag;
         }
         else
@@ -701,7 +701,6 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
                 viscosityForce += forceTerm;
                 
                 sumTest += (particleMass * dot(particle.velocity, forceTerm));
-                //if (DebugBuffer[id.x].x > artVisc) DebugBuffer[id.x].x = artVisc;
                 
                 float compWork = max(velDivTerm, 0.0f);
                 float viscosityTerm = 0.5f * particleMass * artVisc * compWork;
@@ -716,10 +715,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
     particle.entropy += change;
     
     ParticleBuffer[id.x] = particle;
-    //viscosityForce = float3(clamp(viscosityForce.x, -20.0f, 20.0f), clamp(viscosityForce.y, -20.0f, 20.0f), clamp(viscosityForce.z, -20.0f, 20.0f));
     ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
-    //DebugBuffer[id.x].x = length(viscosityForce);
-    DebugBuffer[id.x].x = sumTest;
 }
 
 // kernel 7
