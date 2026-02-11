@@ -14069,9 +14069,9 @@ MonoBehaviour:
   alphaMax: 1.5
   alphaMin: 0
   viscosityEpsilon: 0.01
-  temperatureThreshold: 1e+12
+  temperatureThreshold: 90
   rateCoefficient: 0.5
-  energyPerUnitMass: 6.3e+14
+  energyPerUnitMass: 630000
   enableDataCollection: 0
   TimeBetweenSamples: 0.1
   TotalSampleTime: 60
@@ -14238,10 +14238,11 @@ MonoBehaviour:
   gradientResolution: 50
   densityRange: {x: 0.2, y: 1}
   velocityRange: {x: 0, y: 2}
-  entropyRange: {x: 75, y: 85}
-  temperatureRange: {x: 40, y: 100}
+  entropyRange: {x: 75, y: 90}
+  temperatureRange: {x: 40, y: 90}
   SmoothingRange: {x: 0.6, y: 1}
-  displayMode: 4
+  hydroRange: {x: 0.999, y: 1}
+  displayMode: 2
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

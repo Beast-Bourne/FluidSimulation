@@ -8,7 +8,8 @@ public enum ParticleDisplayMode
     Velocity = 1,
     Entropy = 2,
     Temperature = 3,
-    SmoothingRadius = 4
+    SmoothingRadius = 4,
+    HydrogenRatio = 5
 }
 
 public class NebulaParticleDisplay : MonoBehaviour
@@ -32,6 +33,7 @@ public class NebulaParticleDisplay : MonoBehaviour
     public Vector2 entropyRange;
     public Vector2 temperatureRange;
     public Vector2 SmoothingRange;
+    public Vector2 hydroRange;
     public ParticleDisplayMode displayMode;
 
     ComputeBuffer argsBuffer;
@@ -74,6 +76,7 @@ public class NebulaParticleDisplay : MonoBehaviour
             material.SetVector("energyRange", entropyRange);
             material.SetVector("tempRange", temperatureRange);
             material.SetVector("smoothingRange", SmoothingRange);
+            material.SetVector("hydroRange", hydroRange);
             material.SetInt("displayType", (int)displayMode);
 
             // check if the below can be removed

@@ -36,6 +36,7 @@ struct ParticleEntropyData
     float alpha;
     float soundSpeed;
     float divV;
+    float fusionEnergyRate;
 };
 
 // NOTE: should optimise this later (need padding for alignment)
@@ -378,7 +379,7 @@ float CalculateFusionRate(float temp, float density, float hydroWeight)
     if (temp < fusionTempThreshold) return 0.0f;
     
     // NOTE: this is simple proton-proton fusion rate calculation, look into more complex rates later
-    float rate = fusionRateCoefficient * pow(temp, 4) * density * hydroWeight * hydroWeight;
+    float rate = fusionRateCoefficient * pow(temp/fusionTempThreshold, 4) * density * hydroWeight * hydroWeight;
     return rate;
 }
 
@@ -591,6 +592,7 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
     ParticleData particle = ParticleBuffer[id.x];
+    ParticleEntropyData entropyData = EntropyDataBuffer[id.x];
     
     // calculate temperature this frame
     particle.temperature = (protonMass * particle.meanMolecularWeight / boltzmannConstant) * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1);
@@ -604,8 +606,10 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
     
     particle.hydroWeight = hydroWeight;
     particle.meanMolecularWeight = meanMolecularWeight;
+    entropyData.fusionEnergyRate = fusionRate;
+
     ParticleBuffer[id.x] = particle;
-    //DebugBuffer[id.x] = float2(particle.temperature, particle.entropy);
+    EntropyDataBuffer[id.x] = entropyData;
 }
 
 // kernel 6
@@ -709,8 +713,11 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
             }
         }
     }
+    
+    float entropyFactor = (adiabaticIndex - 1) * pow(abs(particle.density), 1-adiabaticIndex);
+    float fusionTerm = entropyData.fusionEnergyRate * entropyFactor;
 
-    float change = (viscTerm + condTerm) * GlobalDeltaTimeBuffer[0];
+    float change = (viscTerm + condTerm + fusionTerm) * GlobalDeltaTimeBuffer[0];
     change += ApplyCooling(particle.entropy, particle.density, particle.meanMolecularWeight);
     particle.entropy += change;
     

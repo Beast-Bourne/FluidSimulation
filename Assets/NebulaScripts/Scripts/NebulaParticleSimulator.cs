@@ -117,7 +117,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         // tell the computer shader which kernels have access to which buffers
         ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel);
-        ComputeHelper.SetBuffer(compute, entropyDataBuffer, "EntropyDataBuffer", updateEntropyKernel, balsaraFactorKernel, deltaTimeKernel);
+        ComputeHelper.SetBuffer(compute, entropyDataBuffer, "EntropyDataBuffer", updateEntropyKernel, balsaraFactorKernel, deltaTimeKernel, fusionKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
         ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", updateEntropyKernel, fusionKernel, pressureCorrectionKernel, pressureForceKernel, smoothingRadiusKernel);
@@ -253,7 +253,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         compute.SetFloat("sigma", 1 / Mathf.PI);
 
-        ShowDebugData();
+        //ShowDebugData();
     }
 
     // Sets the initial buffer data for the simulation
@@ -290,7 +290,8 @@ public class NebulaParticleSimulator : MonoBehaviour
             {
                 alpha = 2.0f,
                 soundSpeed = 0.0f,
-                divV = 0.0f
+                divV = 0.0f,
+                fusionEnergyRate = 0.0f
             };
             allEntropyData[i] = entropyData;
         }
@@ -439,4 +440,5 @@ public struct ParticleEntropyData
     public float alpha;
     public float soundSpeed;
     public float divV;
+    public float fusionEnergyRate;
 }

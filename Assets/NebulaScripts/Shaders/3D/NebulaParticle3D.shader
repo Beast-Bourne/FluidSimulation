@@ -45,6 +45,7 @@ Shader "Hidden/Particle3D"
             float2 energyRange;
             float2 tempRange;
             float2 smoothingRange;
+            float2 hydroRange;
             int displayType;
 
             float3 colour; // check if this can be removed
@@ -86,6 +87,12 @@ Shader "Hidden/Particle3D"
                 {
                     float smoothing = particles[instanceID].smoothingRadius;
                     float tempT = saturate((smoothing - smoothingRange.x) / (smoothingRange.y - smoothingRange.x));
+                    colT = tempT;
+                }
+                else if (displayType == 5)
+                {
+                    float hydro = particles[instanceID].hydroWeight;
+                    float tempT = saturate((hydro - hydroRange.x) / (hydroRange.y - hydroRange.x));
                     colT = tempT;
                 }
 
