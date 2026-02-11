@@ -9,6 +9,7 @@
 #pragma kernel CalculateGravity
 #pragma kernel CalculatePressureCorrection
 #pragma kernel CalculatePressureForce
+#pragma kernel CalculateXSPH
 #pragma kernel UpdatePositions
 #pragma kernel InitialiseEntropy
 
@@ -78,10 +79,17 @@ static const int threadCount = 64;
 RWStructuredBuffer<ParticleData> ParticleBuffer;
 RWStructuredBuffer<ParticleEntropyData> EntropyDataBuffer;
 RWStructuredBuffer<float3> ResultantForces;
+
+// gravity buffers
+RWStructuredBuffer<float3> GravityForceBuffer;
+RWStructuredBuffer<float3> GravityCorrectionBuffer;
+
+// timestep buffers
 RWStructuredBuffer<float> DeltaTimeBuffer; // holds the per-particle adaptive timestep values
 RWStructuredBuffer<float> GlobalDeltaTimeBuffer; // holds the global delta time value for the current frame (computed on a different shader that's run between kernel 4 and 5)
 
-RWStructuredBuffer<float2> DebugBuffer;
+// debug buffers
+RWStructuredBuffer<float3> DebugBuffer;
 
 // Spatial hash buffers
 // SpatialDataBuffer[i] stores the spatial hash data for the particles. stores each layer for efficient access
@@ -113,7 +121,6 @@ const float softeningLength;
 
 // smoothing and pressure constants
 const float pressureMultiplier;
-const bool useXSPH;
 const float adiabaticIndex;
 const bool useDynamicSmoothingRadius;
 
@@ -134,6 +141,7 @@ const float viscocityMultiplier;
 
 // fusion constants
 const float fusionTempThreshold;
+const float fusionDensityThreshold;
 const float fusionRateCoefficient;
 const float energyPerUnitMass;
 
@@ -331,7 +339,7 @@ float GetTargetSmoothRad(float density)
 {
     const float eta = 1.2f;
     const float invDim = 1.0f / 3.0f;
-    return eta * pow(abs(0.3f / density), invDim);
+    return eta * pow(abs(0.275f / density), invDim);
 
 }
 
@@ -377,8 +385,9 @@ float CalculateParticlesDensity(float3 predPos, float smoothRad, uint particleIn
 float CalculateFusionRate(float temp, float density, float hydroWeight)
 {
     if (temp < fusionTempThreshold) return 0.0f;
+    if (density < fusionDensityThreshold) return 0.0f;
     
-    // NOTE: this is simple proton-proton fusion rate calculation, look into more complex rates later
+    // NOTE: this is a simple proton-proton fusion rate equation (does not work for CNO cycle)
     float rate = fusionRateCoefficient * pow(temp/fusionTempThreshold, 4) * density * hydroWeight * hydroWeight;
     return rate;
 }
@@ -630,10 +639,6 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
     
     float3 viscosityForce = float3(0.0f, 0.0f, 0.0f);
     
-    float sumTest;
-    
-    DebugBuffer[id.x].x = 0.0f;
-    
     for (int i = 0; i < 27; i++)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
@@ -704,8 +709,6 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
                 float3 forceTerm = -particleMass * artVisc * avgGradW;
                 viscosityForce += forceTerm;
                 
-                sumTest += (particleMass * dot(particle.velocity, forceTerm));
-                
                 float compWork = max(velDivTerm, 0.0f);
                 float viscosityTerm = 0.5f * particleMass * artVisc * compWork;
                 float entropyChange = viscosityTerm * entropyFactor * viscocityMultiplier;
@@ -718,7 +721,8 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
     float fusionTerm = entropyData.fusionEnergyRate * entropyFactor;
 
     float change = (viscTerm + condTerm + fusionTerm) * GlobalDeltaTimeBuffer[0];
-    change += ApplyCooling(particle.entropy, particle.density, particle.meanMolecularWeight);
+    float coolingChange = ApplyCooling(particle.entropy, particle.density, particle.meanMolecularWeight);
+    change += coolingChange;
     particle.entropy += change;
     
     ParticleBuffer[id.x] = particle;
@@ -740,6 +744,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     }
     
     ResultantForces[id.x] += gravityAccel;
+    GravityForceBuffer[id.x] = gravityAccel;
 }
 
 // kernel 8
@@ -854,6 +859,60 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 10
+// calculates the XSPH velocity correction
+// XSPH is a velocity smoothing technique that helps reduce numerical instabilities
+[numthreads(threadCount, 1, 1)]
+void CalculateXSPH(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    
+    ParticleData particle = ParticleBuffer[id.x];
+    
+    float3 xsph = 0;
+    float eps = 0.01; // try 0.03..0.1
+        
+    float smoothRad = particle.smoothingRadius;
+    int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(smoothRad));
+
+    for (int n = 0; n < 27; n++)
+    {
+        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[n]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+
+        while (index < numParticles)
+        {
+            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+            index++;
+
+            if (indexData[2] != key) break;
+            if (indexData[1] != hash) continue;
+
+            uint adjIndex = indexData[0];
+            if (adjIndex == id.x) continue; // skip over itself
+
+            ParticleData adjParticle = ParticleBuffer[adjIndex];
+                
+            float3 offset = particle.predictedPos - adjParticle.predictedPos;
+            float sqrDist = dot(offset, offset);
+                
+            float testSmoothRad = max(smoothRad, adjParticle.smoothingRadius);
+            if (sqrDist > testSmoothRad * testSmoothRad) continue;
+
+            float dist = sqrt(sqrDist);
+            float w = 0.5f * (Influence(dist, smoothRad) + Influence(dist, adjParticle.smoothingRadius)); // normal density kernel
+
+            float avgDensity = 0.5f * (particle.density + adjParticle.density);
+                
+            xsph += (adjParticle.velocity - particle.velocity) * w * (particleMass / avgDensity);
+        }
+    }
+    
+    particle.velocity += (eps * xsph);
+    ParticleBuffer[id.x] = particle;
+}
+
+// kernel 11
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
@@ -861,55 +920,14 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     
     ParticleData particle = ParticleBuffer[id.x];
-    particle.velocity += ResultantForces[id.x] * GlobalDeltaTimeBuffer[0];
     
-    // XSPH is a velocity smoothing technique that helps reduce numerical instabilities
-    if (useXSPH)
-    {
-        float3 xsph = 0;
-        float eps = 0.01; // try 0.03..0.1
-        
-        float smoothRad = particle.smoothingRadius;
-        int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(smoothRad));
-
-        for (int n = 0; n < 27; n++)
-        {
-            uint hash = HashGridPos3D(originGridPos + GridOffsets3D[n]);
-            uint key = KeyFromHash(hash, numParticles);
-            uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
-
-            while (index < numParticles)
-            {
-                uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
-                index++;
-
-                if (indexData[2] != key) break;
-                if (indexData[1] != hash) continue;
-
-                uint adjIndex = indexData[0];
-                if (adjIndex == id.x) continue; // skip over itself
-
-                ParticleData adjParticle = ParticleBuffer[adjIndex];
-                
-                float3 offset = particle.predictedPos - adjParticle.predictedPos;
-                float sqrDist = dot(offset, offset);
-                
-                if (sqrDist > smoothRad * smoothRad) continue;
-
-                float dist = sqrt(sqrDist);
-                float w = Influence(dist, smoothRad); // normal density kernel
-
-                xsph += (adjParticle.velocity - particle.velocity) * w * (particleMass / adjParticle.density);
-            }
-        }
-        particle.velocity += (eps * xsph);
-    }
-    
+    particle.velocity += (ResultantForces[id.x] + GravityCorrectionBuffer[0]) * GlobalDeltaTimeBuffer[0];
     particle.position += particle.velocity * GlobalDeltaTimeBuffer[0];
+    
     ParticleBuffer[id.x] = HandleCollisions(particle);
 }
 
-// kernel 11
+// kernel 12
 // run once at the start of the simulation to set the inital entropy values
 [numthreads(threadCount, 1, 1)]
 void InitialiseEntropy(uint3 id : SV_DispatchThreadID)

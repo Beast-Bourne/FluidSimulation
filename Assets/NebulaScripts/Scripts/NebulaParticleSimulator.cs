@@ -15,6 +15,8 @@ public class NebulaParticleSimulator : MonoBehaviour
     public ComputeBuffer particleBuffer { get; private set; }
     ComputeBuffer entropyDataBuffer;
     ComputeBuffer ResultantForceBuffer;
+    ComputeBuffer gravityForceBuffer;
+    ComputeBuffer gravityCorrectionBuffer;
     ComputeBuffer deltaTimeBuffer;
     ComputeBuffer globalDeltaTimeBuffer;
     ComputeBuffer OctreeBuffer;
@@ -26,15 +28,15 @@ public class NebulaParticleSimulator : MonoBehaviour
     ComputeBuffer SpatialOffsetsBuffer;
     BufferSorter sorter;
 
-    // timestep manager
+    // reduction managers
     TimestepManager timestepManager;
+    GravityReductionManager gravityReductionManager;
 
     [Header("Simulation Settings")]
     public float CFLScale;
     public float damping;
     public float pressureMultiplier;
     public float adiabaticIndex;
-    public bool useXSPH;
     public bool isPaused;
 
     [Header("Smoothing Radius Settings")]
@@ -67,6 +69,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
     [Header("Fusion Settings")]
     public float temperatureThreshold;
+    public float densityThreshold;
     public float rateCoefficient;
     public float energyPerUnitMass;
 
@@ -88,8 +91,9 @@ public class NebulaParticleSimulator : MonoBehaviour
     const int gravityKernel = 7;
     const int pressureCorrectionKernel = 8;
     const int pressureForceKernel = 9;
-    const int updatePositionKernel = 10;
-    const int initialiseEntropyKernel = 11;
+    const int XSPHKernel = 10;
+    const int updatePositionKernel = 11;
+    const int initialiseEntropyKernel = 12;
 
     // other
     NebulaParticleSpawner.ParticleSpawnData spawnData;
@@ -105,9 +109,11 @@ public class NebulaParticleSimulator : MonoBehaviour
         particleCount = spawnData.positions.Length;
         particleBuffer = ComputeHelper.CreateStructuredBuffer<ParticleData>(particleCount);
         entropyDataBuffer = ComputeHelper.CreateStructuredBuffer<ParticleEntropyData>(particleCount);
+        gravityForceBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
+        gravityCorrectionBuffer = ComputeHelper.CreateStructuredBuffer<float3>(1);
         OctreeBuffer = ComputeHelper.CreateStructuredBuffer<OctreeNode>(octreeManager.NumOfNodes);
         SpatialHashes = ComputeHelper.CreateStructuredBuffer<uint>(octreeManager.NumBottomLayerNodes * (int)octreeManager.NumOfHashesPerLeafNode);
-        debugBuffer = ComputeHelper.CreateStructuredBuffer<float2>(particleCount);
+        debugBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
         ResultantForceBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
         deltaTimeBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         globalDeltaTimeBuffer = ComputeHelper.CreateStructuredBuffer<float>(1);
@@ -116,16 +122,18 @@ public class NebulaParticleSimulator : MonoBehaviour
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel);
+        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel, XSPHKernel);
         ComputeHelper.SetBuffer(compute, entropyDataBuffer, "EntropyDataBuffer", updateEntropyKernel, balsaraFactorKernel, deltaTimeKernel, fusionKernel);
+        ComputeHelper.SetBuffer(compute, gravityForceBuffer, "GravityForceBuffer", gravityKernel);
+        ComputeHelper.SetBuffer(compute, gravityCorrectionBuffer, "GravityCorrectionBuffer", updatePositionKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
-        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", updateEntropyKernel, fusionKernel, pressureCorrectionKernel, pressureForceKernel, smoothingRadiusKernel);
+        ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", gravityKernel, updateEntropyKernel);
         ComputeHelper.SetBuffer(compute, deltaTimeBuffer, "DeltaTimeBuffer", deltaTimeKernel);
         ComputeHelper.SetBuffer(compute, globalDeltaTimeBuffer, "GlobalDeltaTimeBuffer", deltaTimeKernel, fusionKernel, updateEntropyKernel, updatePositionKernel, UpdatePredictionsKernel, balsaraFactorKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, updateEntropyKernel);
-        ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel);
-        ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel);
+        ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, XSPHKernel);
+        ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, XSPHKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -133,6 +141,9 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         timestepManager = new();
         timestepManager.SetBuffers(deltaTimeBuffer, globalDeltaTimeBuffer, particleCount);
+
+        gravityReductionManager = new();
+        gravityReductionManager.SetBuffers(gravityForceBuffer, gravityCorrectionBuffer, particleCount);
 
         octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, spatialStage1Size, SpatialDataBuffer, SpatialOffsetsBuffer, particleCount, particleBuffer, particleMass);
 
@@ -203,12 +214,16 @@ public class NebulaParticleSimulator : MonoBehaviour
         // GRAVITY AND OCTREE
         octreeManager.UpdateOctree(); // update the octree mass values
         ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity using the octree
+        gravityReductionManager.PerformReduction(); // perform the reduction to get the gravity force correction value for this frame
 
         // PRESSURE CORRECTIONS
         ComputeHelper.Dispatch(compute, particleCount, pressureCorrectionKernel);
 
         // PRESSURE FORCE
         ComputeHelper.Dispatch(compute, particleCount, pressureForceKernel);
+
+        // XSPH
+        ComputeHelper.Dispatch(compute, particleCount, XSPHKernel);
 
         // APPLY VELOCITY
         ComputeHelper.Dispatch(compute, particleCount, updatePositionKernel);
@@ -226,7 +241,6 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetVector("boundSize", new Vector3(octreeManager.BoundSize, octreeManager.BoundSize, octreeManager.BoundSize));
         compute.SetFloat("damping", damping);
         compute.SetFloat("pressureMultiplier", pressureMultiplier);
-        compute.SetBool("useXSPH", useXSPH);
         compute.SetFloat("viscocityMultiplier", viscocityMultiplier);
         compute.SetFloat("adiabaticIndex", adiabaticIndex);
         compute.SetBool("useDynamicSmoothingRadius", useDynamicSmoothingRadius);
@@ -243,6 +257,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("conductionCoefficient", conductionCoefficient);
 
         compute.SetFloat("fusionTempThreshold", temperatureThreshold);
+        compute.SetFloat("fusionDensityThreshold", densityThreshold);
         compute.SetFloat("fusionRateCoefficient", rateCoefficient);
         compute.SetFloat("energyPerUnitMass", energyPerUnitMass);
 
@@ -253,7 +268,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         compute.SetFloat("sigma", 1 / Mathf.PI);
 
-        //ShowDebugData();
+        ShowDebugData();
     }
 
     // Sets the initial buffer data for the simulation
@@ -264,11 +279,11 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         ParticleData[] allParticles = new ParticleData[particleCount];
         ParticleEntropyData[] allEntropyData = new ParticleEntropyData[particleCount];
-        float2[] debugData = new float2[allParticles.Length];
+        float3[] debugData = new float3[allParticles.Length];
 
         for (int i = 0; i < allParticles.Length; i++)
         {
-            debugData[i] = new float2(float.MaxValue, 0.0f);
+            debugData[i] = new float3(0.0f, 0.0f, 0.0f);
 
             ParticleData particle = new ParticleData
             {
@@ -304,6 +319,9 @@ public class NebulaParticleSimulator : MonoBehaviour
         // temporary to test delta time buffer
         float[] deltaT = new float[1] { 0.007f };
         globalDeltaTimeBuffer.SetData(deltaT);
+
+        float3[] gravityCorrectionData = new float3[] { new float3(0.0f, 0.0f, 0.0f) };
+        gravityCorrectionBuffer.SetData(gravityCorrectionData);
     }
 
     void SampleFrameRate(float deltaTime)
@@ -321,47 +339,16 @@ public class NebulaParticleSimulator : MonoBehaviour
 
     void ShowDebugData()
     {
-        float2[] debugData = new float2[particleCount];
+        float3[] debugData = new float3[particleCount];
         debugBuffer.GetData(debugData);
 
-        float greatestOmega = float.MinValue;
-        float smallestOmega = float.MaxValue;
-        float averageOmega = 0.0f;
-        int count = 0;
+        float3 averageOmega = new float3(0.0f, 0.0f, 0.0f);
         for (int i = 0; i < debugData.Length; i++)
         {
-            if (debugData[i].x > greatestOmega) greatestOmega = debugData[i].x;
-            if (debugData[i].x < smallestOmega) smallestOmega = debugData[i].x;
-            averageOmega += debugData[i].x;
-            if (debugData[i].x != 0.0f) count++;
+            averageOmega += debugData[i];
         }
-        if(count!=0) averageOmega /= count;
-        Debug.Log($"average omega: {averageOmega}     greatest omega: {greatestOmega}     smallest omega: {smallestOmega}");
-
-        /*
-        float highestTemp = float.MinValue;
-        float avgTemp = 0.0f;
-        float lowestTemp = float.MaxValue;
-
-        float highestEntropy = float.MinValue;
-        float avgEntropy = 0.0f;
-        float lowestEntropy = 0.0f;
-
-        for (int i = 0; i < debugData.Length; i++)
-        {
-            avgTemp += debugData[i].x;
-            if (debugData[i].x > highestTemp) highestTemp = debugData[i].x;
-            if (debugData[i].x < lowestTemp) lowestTemp = debugData[i].x;
-
-            avgEntropy += debugData[i].y;
-            if ( debugData[i].y > highestEntropy) highestEntropy = debugData[i].y;
-            if (debugData[i].y < lowestEntropy) lowestEntropy = debugData[i].y;
-        }
-        avgTemp /= debugData.Length;
-        avgEntropy /= debugData.Length;
-        Debug.Log($"average temp: {avgTemp}     Highest temp: {highestTemp}     Lowest temp: {lowestTemp} " +
-            $"\n        average entropy: {avgEntropy}     Highest entropy: {highestEntropy}     Lowest entropy: {lowestEntropy}");
-        */
+        averageOmega /= particleCount;
+        Debug.Log($"average momentum: {averageOmega.x:F5}, {averageOmega.y:F5}, {averageOmega.z:F5}");
     }
 
     private void OnApplicationQuit()
@@ -400,8 +387,12 @@ public class NebulaParticleSimulator : MonoBehaviour
     // Clears the memory of all the buffers from the compute shader when the program is closed
     private void OnDestroy()
     {
-        ComputeHelper.Release(particleBuffer, OctreeBuffer, SpatialHashes, debugBuffer, ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, entropyDataBuffer);
+        ComputeHelper.Release(particleBuffer, OctreeBuffer, SpatialHashes, debugBuffer, 
+                              ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, 
+                              entropyDataBuffer, gravityForceBuffer, gravityCorrectionBuffer);
+        
         timestepManager.ReleaseBuffers();
+        gravityReductionManager.ReleaseBuffers();
     }
 }
 

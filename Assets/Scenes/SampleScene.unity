@@ -13925,7 +13925,7 @@ MonoBehaviour:
   particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
   spawnSize: 36
-  VelocitySigma: 1.5
+  VelocitySigma: 0
   randomOffsetStrength: 0.5
 --- !u!1 &1374176186
 GameObject:
@@ -14045,32 +14045,32 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   CFLScale: 0.8
   damping: 0.8
-  pressureMultiplier: 0.9
+  pressureMultiplier: 1.35
   adiabaticIndex: 1.4
-  useXSPH: 1
   isPaused: 0
   minFactor: 1
   spatialStage1Size: 0.6
   spatialStage2Size: 0.75
   spatialStage3Size: 1
   useDynamicSmoothingRadius: 1
-  gravity: 0.33
+  gravity: 0.1
   particleMass: 1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01
-  InitialTemperature: 50
+  InitialTemperature: 10
   BoltzmannConstant: 0.05
   ProtonMass: 0.09
-  coolingLambda: 0
-  coolingAlpha: 0
+  coolingLambda: 0.0001
+  coolingAlpha: 0.0001
   coolingSubcycles: 4
   conductionCoefficient: 0.3
   viscocityMultiplier: 1
   alphaMax: 1.5
-  alphaMin: 0
+  alphaMin: 0.2
   viscosityEpsilon: 0.01
-  temperatureThreshold: 90
-  rateCoefficient: 0.5
+  temperatureThreshold: 20
+  densityThreshold: 0.7
+  rateCoefficient: 0.0005
   energyPerUnitMass: 630000
   enableDataCollection: 0
   TimeBetweenSamples: 0.1
@@ -14238,8 +14238,8 @@ MonoBehaviour:
   gradientResolution: 50
   densityRange: {x: 0.2, y: 1}
   velocityRange: {x: 0, y: 2}
-  entropyRange: {x: 75, y: 90}
-  temperatureRange: {x: 40, y: 90}
+  entropyRange: {x: 15, y: 19}
+  temperatureRange: {x: 8, y: 20}
   SmoothingRange: {x: 0.6, y: 1}
   hydroRange: {x: 0.999, y: 1}
   displayMode: 2
