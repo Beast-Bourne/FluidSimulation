@@ -799,7 +799,7 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
     float newCorrection = 1.0f - (densityTerm * sum_dW_dh);
     newCorrection = clamp(newCorrection, 0.5f, 2.0f);
     
-    float pressure = particle.entropy * pow(abs(particle.density), adiabaticIndex);
+    float pressure = particle.entropy * pow(abs(density), adiabaticIndex);
     float pressureTerm = (pressure / (density * density * newCorrection));
     
     particle.pressureCorrection = pressureTerm;
