@@ -334,12 +334,12 @@ uint GetTargetLayer(float smoothRad)
     return (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3;
 }
 
-// NOTE: look into fixing this.
+// NOTE: need to tune 'eta' to get good results (do this after optimising for more particles)
 float GetTargetSmoothRad(float density)
 {
     const float eta = 1.2f;
     const float invDim = 1.0f / 3.0f;
-    return eta * pow(abs(0.275f / density), invDim);
+    return eta * pow(abs(0.331f / density), invDim);
 
 }
 
@@ -367,7 +367,7 @@ float CalculateParticlesDensity(float3 predPos, float smoothRad, uint particleIn
             
             uint adjacentIndex = indexData[0];
             
-            if (adjacentIndex == particleIndex) { density += (Influence(0, smoothRad) * particleMass); continue; }
+            if (adjacentIndex == particleIndex) { density += (WendlandC2(0, smoothRad) * particleMass); continue; }
             
             float3 offsetFromAdjacent = predPos - ParticleBuffer[adjacentIndex].predictedPos;
             float sqrDist = dot(offsetFromAdjacent, offsetFromAdjacent);
@@ -375,7 +375,7 @@ float CalculateParticlesDensity(float3 predPos, float smoothRad, uint particleIn
             if (sqrDist > smoothRad * smoothRad) continue; // if the particle is outside the smoothing radius then skip it
             
             float dist = sqrt(sqrDist);
-            density += (Influence(dist, smoothRad) * particleMass);
+            density += (WendlandC2(dist, smoothRad) * particleMass);
         }
     }
     
@@ -540,7 +540,7 @@ void CalculateBalsaraFactor(uint3 id : SV_DispatchThreadID)
             float3 dirToAdj = offsetToAdj / max(dist, 1e-6);
             
             float3 relVel = adjParticle.velocity - particle.velocity; // NOTE: check if this should be the other way around
-            float3 gradW = DerivativeInfluence(dist, avgSmoothRad) * dirToAdj; // NOTE: check if this should even be using avgSmoothRad
+            float3 gradW = WendlandC2Derivative(dist, avgSmoothRad) * dirToAdj; // NOTE: check if this should even be using avgSmoothRad
             float m_dens = particleMass / adjParticle.density;
             
             divV += m_dens * dot(relVel, gradW);
@@ -670,8 +670,8 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
             float3 dirFromAdj = offsetFromAdj / max(dist, 1e-6);
             
             // compute needed properties
-            float3 gradW = DerivativeInfluence(dist, smoothRad) * dirFromAdj;
-            float3 adjGradW = DerivativeInfluence(dist, adjParticle.smoothingRadius) * dirFromAdj;
+            float3 gradW = WendlandC2Derivative(dist, smoothRad) * dirFromAdj;
+            float3 adjGradW = WendlandC2Derivative(dist, adjParticle.smoothingRadius) * dirFromAdj;
             float3 avgGradW = 0.5 * (gradW + adjGradW);
             
             float densFactor = pow(abs(particle.density), adiabaticIndex - 1);
@@ -719,6 +719,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
     
     float entropyFactor = (adiabaticIndex - 1) * pow(abs(particle.density), 1-adiabaticIndex);
     float fusionTerm = entropyData.fusionEnergyRate * entropyFactor;
+    fusionTerm = min(fusionTerm, particle.entropy * 0.005f);
 
     float change = (viscTerm + condTerm + fusionTerm) * GlobalDeltaTimeBuffer[0];
     float coolingChange = ApplyCooling(particle.entropy, particle.density, particle.meanMolecularWeight);
@@ -727,6 +728,7 @@ void UpdateEntropies(uint3 id : SV_DispatchThreadID)
     
     ParticleBuffer[id.x] = particle;
     ResultantForces[id.x] += viscosityForce * viscocityMultiplier;
+    DebugBuffer[id.x].x = particle.entropy;
 }
 
 // kernel 7
@@ -786,8 +788,8 @@ void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
             if (sqrDist > avgSmoothRad * avgSmoothRad) continue;
             
             float dist = sqrt(sqrDist);
-            float W = Influence(dist, smoothRad);
-            float dw_dr = DerivativeInfluence(dist, smoothRad);
+            float W = WendlandC2(dist, smoothRad);
+            float dw_dr = WendlandC2Derivative(dist, smoothRad);
             
             float dw_dh = (3.0f * W / smoothRad) + (dist * dw_dr / smoothRad);
             sum_dW_dh += particleMass * dw_dh;
@@ -849,8 +851,8 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             float3 dirFromAdj = offsetFromAdj / max(dist, 1e-6);
             
             // calculate the pressure force contribution from this neighbour particle
-            float3 gradW = DerivativeInfluence(dist, smoothRad) * dirFromAdj;
-            float3 adjGradW = DerivativeInfluence(dist, adjParticle.smoothingRadius) * dirFromAdj;
+            float3 gradW = WendlandC2Derivative(dist, smoothRad) * dirFromAdj;
+            float3 adjGradW = WendlandC2Derivative(dist, adjParticle.smoothingRadius) * dirFromAdj;
             pressureForce += -particleMass * ((particle.pressureCorrection * gradW) + (adjParticle.pressureCorrection * adjGradW));
         }
     }
@@ -900,7 +902,7 @@ void CalculateXSPH(uint3 id : SV_DispatchThreadID)
             if (sqrDist > testSmoothRad * testSmoothRad) continue;
 
             float dist = sqrt(sqrDist);
-            float w = 0.5f * (Influence(dist, smoothRad) + Influence(dist, adjParticle.smoothingRadius)); // normal density kernel
+            float w = 0.5f * (WendlandC2(dist, smoothRad) + WendlandC2(dist, adjParticle.smoothingRadius)); // normal density kernel
 
             float avgDensity = 0.5f * (particle.density + adjParticle.density);
                 

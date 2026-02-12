@@ -267,6 +267,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("minSizeFactor", minFactor);
 
         compute.SetFloat("sigma", 1 / Mathf.PI);
+        compute.SetFloat("C2Const", 21.0f/ (16.0f * Mathf.PI));
 
         ShowDebugData();
     }
@@ -342,13 +343,17 @@ public class NebulaParticleSimulator : MonoBehaviour
         float3[] debugData = new float3[particleCount];
         debugBuffer.GetData(debugData);
 
-        float3 averageOmega = new float3(0.0f, 0.0f, 0.0f);
+        float average = 0.0f;
+        float max = float.MinValue;
+        float min = float.MaxValue;
         for (int i = 0; i < debugData.Length; i++)
         {
-            averageOmega += debugData[i];
+            average += debugData[i].x;
+            if (debugData[i].x > max) max = debugData[i].x;
+            if (debugData[i].x < min) min = debugData[i].x;
         }
-        averageOmega /= particleCount;
-        Debug.Log($"average momentum: {averageOmega.x:F5}, {averageOmega.y:F5}, {averageOmega.z:F5}");
+        average /= particleCount;
+        Debug.Log($"average: {average}, maximum: {max}, minumum: {min}");
     }
 
     private void OnApplicationQuit()
