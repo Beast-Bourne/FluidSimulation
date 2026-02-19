@@ -22,7 +22,6 @@ public class NebulaParticleDisplay : MonoBehaviour
 
     [Header("Particle Settings")]
     public float scale;
-    public Color colour;
     Material material;
 
     [Header("Display Settings")]
@@ -71,16 +70,21 @@ public class NebulaParticleDisplay : MonoBehaviour
             TextureFromGradient(ref gradientTexture, gradientResolution, colourMap);
             material.SetTexture("ColourMap", gradientTexture);
             material.SetFloat("scale", scale);
-            material.SetVector("densityRange", densityRange);
-            material.SetVector("velocityRange", velocityRange);
-            material.SetVector("energyRange", entropyRange);
-            material.SetVector("tempRange", temperatureRange);
-            material.SetVector("smoothingRange", SmoothingRange);
-            material.SetVector("hydroRange", hydroRange);
             material.SetInt("displayType", (int)displayMode);
 
-            // check if the below can be removed
-            material.SetColor("colour", colour);
+            Vector2 density = new Vector2(densityRange.x, (1.0f/(densityRange.y - densityRange.x)));
+            Vector2 velocity = new Vector2(velocityRange.x, (1.0f/(velocityRange.y - velocityRange.x)));
+            Vector2 entropy = new Vector2(entropyRange.x, (1.0f/(entropyRange.y - entropyRange.x)));
+            Vector2 temperature = new Vector2(temperatureRange.x, (1.0f/(temperatureRange.y - temperatureRange.x)));
+            Vector2 smoothing = new Vector2(SmoothingRange.x, (1.0f/(SmoothingRange.y - SmoothingRange.x)));
+            Vector2 hydro = new Vector2(hydroRange.x, (1.0f/(hydroRange.y - hydroRange.x)));
+
+            material.SetVector("densityRange", density);
+            material.SetVector("velocityRange", velocity);
+            material.SetVector("energyRange", entropy);
+            material.SetVector("tempRange", temperature);
+            material.SetVector("smoothingRange", smoothing);
+            material.SetVector("hydroRange", hydro);
 
             Vector3 s = transform.localScale;
             transform.localScale = Vector3.one;

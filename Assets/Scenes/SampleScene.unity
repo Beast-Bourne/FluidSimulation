@@ -14075,7 +14075,7 @@ MonoBehaviour:
   enableDataCollection: 0
   TimeBetweenSamples: 0.1
   TotalSampleTime: 60
-  logFileName: DynamicHLog
+  logFileName: ShaderOptimisationLog
 --- !u!1 &1417070273
 GameObject:
   m_ObjectHideFlags: 0
@@ -14202,9 +14202,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   shader: {fileID: 4800000, guid: 1ce7870ade767a446912c7594f9def5f, type: 3}
-  mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
+  mesh: {fileID: 10210, guid: 0000000000000000e000000000000000, type: 0}
   scale: 0.05
-  colour: {r: 0.07450981, g: 1, b: 0, a: 0}
   colourMap:
     serializedVersion: 2
     key0: {r: 0.13363299, g: 0.34235913, b: 0.7264151, a: 1}
@@ -14241,8 +14240,8 @@ MonoBehaviour:
   entropyRange: {x: 12, y: 17}
   temperatureRange: {x: 8, y: 20}
   SmoothingRange: {x: 0.75, y: 1.25}
-  hydroRange: {x: 0.9999, y: 1}
-  displayMode: 2
+  hydroRange: {x: 0.999, y: 1}
+  displayMode: 0
 --- !u!1 &1810665982
 GameObject:
   m_ObjectHideFlags: 0

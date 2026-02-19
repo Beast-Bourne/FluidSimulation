@@ -269,7 +269,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("sigma", 1 / Mathf.PI);
         compute.SetFloat("C2Const", 21.0f/ (16.0f * Mathf.PI));
 
-        ShowDebugData();
+        //ShowDebugData();
     }
 
     // Sets the initial buffer data for the simulation

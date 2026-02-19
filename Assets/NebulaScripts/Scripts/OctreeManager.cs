@@ -150,7 +150,6 @@ public class OctreeManager : MonoBehaviour
 
         return result;
     }
-
     private void OnDrawGizmos()
     {
         if (DisplayOctree && Octree != null)
