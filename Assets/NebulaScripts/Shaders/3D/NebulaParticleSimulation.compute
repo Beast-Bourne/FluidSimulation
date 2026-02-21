@@ -578,11 +578,12 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
         
     particle.balsaraFactor = divMag / (divMag + curlMag + 1e-4);
     
+    // adaptive viscosity alpha calculations
     float soundSpeed = sqrt(adiabaticIndex * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1));
     
     float tau = smoothRad / (soundSpeed * 0.1f);
     float alpha = entropyData.alpha;
-    float source = max(-divMag, 0.0f) * (viscAlphaMax - alpha);
+    float source = max(-divV, 0.0f) * (viscAlphaMax - alpha);
     alpha += (source - (alpha - viscAlphaMin) / tau) * GlobalDeltaTimeBuffer[0];
     alpha = clamp(alpha, viscAlphaMin, viscAlphaMax);
     
