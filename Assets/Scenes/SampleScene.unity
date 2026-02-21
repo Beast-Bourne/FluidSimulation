@@ -14075,7 +14075,7 @@ MonoBehaviour:
   enableDataCollection: 0
   TimeBetweenSamples: 0.1
   TotalSampleTime: 60
-  logFileName: ShaderOptimisationLog
+  logFileName: CombinedKernelsLog
 --- !u!1 &1417070273
 GameObject:
   m_ObjectHideFlags: 0
