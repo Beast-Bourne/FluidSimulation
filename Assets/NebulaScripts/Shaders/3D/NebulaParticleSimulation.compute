@@ -2,12 +2,11 @@
 #pragma kernel UpdatePredictions
 #pragma kernel UpdateGridHash
 #pragma kernel UpdateSmoothingRadii
-#pragma kernel CalculateBalsaraFactor
+#pragma kernel CorrectionTerms
 #pragma kernel CalculateAdaptiveTimestep
 #pragma kernel UpdateFusionRate
 #pragma kernel UpdateEntropies
 #pragma kernel CalculateGravity
-#pragma kernel CalculatePressureCorrection
 #pragma kernel CalculatePressureForce
 #pragma kernel CalculateXSPH
 #pragma kernel UpdatePositions
@@ -498,19 +497,26 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
 
 // kernel 3
 // computes the balsara factor for reducing artificial viscosity in shear flows
+// also compute the pressure correction term (for correcting errors from a varaible smoothing radius)
 [numthreads(threadCount, 1, 1)]
-void CalculateBalsaraFactor(uint3 id : SV_DispatchThreadID)
+void CorrectionTerms(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= numParticles) return;
+    if (id.x >= numParticles)
+        return;
+    
     ParticleData particle = ParticleBuffer[id.x];
     ParticleEntropyData entropyData = EntropyDataBuffer[id.x];
     
     float smoothRad = particle.smoothingRadius;
     int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(smoothRad));
     
+    // variables for storing neighbour contributions
     float divV = 0.0f;
     float3 curlV = 0.0f;
     
+    float sum_dW_dh = 0.0f;
+    
+    // neighbour loop
     for (int i = 0; i < 27; i++)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
@@ -519,54 +525,82 @@ void CalculateBalsaraFactor(uint3 id : SV_DispatchThreadID)
         
         while (index < numParticles)
         {
+            // check for valid interaction
             uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
             index++;
             
-            if (indexData[2] != key) break;
-            if (indexData[1] != hash) continue;
+            if (indexData[2] != key)
+                break;
+            if (indexData[1] != hash)
+                continue;
             
             uint adjIndex = indexData[0];
-            if (adjIndex == id.x) continue;
+            if (adjIndex == id.x)
+                continue;
             
             ParticleData adjParticle = ParticleBuffer[adjIndex];
             
             float3 offsetToAdj = particle.predictedPos - adjParticle.predictedPos;
             float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
             
-            float avgSmoothRad = 0.5 * (smoothRad + adjParticle.smoothingRadius);
-            if (sqrDistToAdj > avgSmoothRad * avgSmoothRad) continue;
+            float adjSmoothRad = adjParticle.smoothingRadius;
+            float avgSmoothRad = max(smoothRad, adjSmoothRad);
+            if (sqrDistToAdj > avgSmoothRad * avgSmoothRad)
+                continue;
             
+            // compute needed properties
             float dist = sqrt(sqrDistToAdj);
-            float3 dirToAdj = offsetToAdj / max(dist, 1e-6);
+            float3 dirFromAdj = offsetToAdj / max(dist, 1e-6);
             
-            float3 relVel = adjParticle.velocity - particle.velocity; // NOTE: check if this should be the other way around
-            float3 gradW = WendlandC2Derivative(dist, avgSmoothRad) * dirToAdj; // NOTE: check if this should even be using avgSmoothRad
+            float W_i = WendlandC2(dist, smoothRad);
+            float W_j = WendlandC2(dist, adjSmoothRad);
+            float W_ij = 0.5f * (W_i + W_j);
+            
+            float dw_dr_i = WendlandC2Derivative(dist, smoothRad);
+            float3 gradW_i = dw_dr_i * dirFromAdj;
+            float3 gradW_j = WendlandC2Derivative(dist, adjSmoothRad) * dirFromAdj;
+            float3 gradW_ij = 0.5f * (gradW_i + gradW_j);
+            
+            // balsara factor calculations
             float m_dens = particleMass / adjParticle.density;
+            float3 relVel = adjParticle.velocity - particle.velocity;
+            divV += m_dens * dot(relVel, gradW_ij);
+            curlV += m_dens * cross(relVel, gradW_ij);
             
-            divV += m_dens * dot(relVel, gradW);
-            curlV += m_dens * cross(relVel, gradW);
+            // pressure correction calculations
+            sum_dW_dh += particleMass * ((3.0f * W_i + dist * dw_dr_i) / smoothRad);
         }
     }
     
-    float div = abs(divV);
+    // balsara factor finalisation
+    float divMag = abs(divV);
     float curlMag = length(curlV);
-    const float eps = 1e-4;
         
-    particle.balsaraFactor = div / (div + curlMag + eps);
-    ParticleBuffer[id.x] = particle;
+    particle.balsaraFactor = divMag / (divMag + curlMag + 1e-4);
     
-    // entropy data calculations
     float soundSpeed = sqrt(adiabaticIndex * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1));
     
     float tau = smoothRad / (soundSpeed * 0.1f);
     float alpha = entropyData.alpha;
-    float source = max(-div, 0.0f) * (viscAlphaMax - alpha);
+    float source = max(-divMag, 0.0f) * (viscAlphaMax - alpha);
     alpha += (source - (alpha - viscAlphaMin) / tau) * GlobalDeltaTimeBuffer[0];
     alpha = clamp(alpha, viscAlphaMin, viscAlphaMax);
     
-    entropyData.divV = div;
+    entropyData.divV = divMag;
     entropyData.soundSpeed = soundSpeed;
     entropyData.alpha = alpha;
+    
+    // pressure correction finalisation
+    float density = particle.density;
+    float densityTerm = smoothRad / (3.0f * density);
+    float newCorrection = 1.0f - (densityTerm * sum_dW_dh);
+    newCorrection = clamp(newCorrection, 0.5f, 2.0f);
+    
+    float pressureTerm = (1.0f / (density * density * newCorrection));
+    particle.pressureCorrection = pressureTerm;
+    
+    // buffer writes
+    ParticleBuffer[id.x] = particle;
     EntropyDataBuffer[id.x] = entropyData;
 }
 
@@ -750,65 +784,6 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 8
-// Calculates the pressure correction for smoothing radius changes
-[numthreads(threadCount, 1, 1)]
-void CalculatePressureCorrection(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= numParticles) return;
-    ParticleData particle = ParticleBuffer[id.x];
-    
-    float smoothRad = particle.smoothingRadius;
-    
-    int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(smoothRad));
-    float sum_dW_dh = 0.0f;
-    
-    for (int i = 0; i < 27; i++)
-    {
-        uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
-        uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
-        
-        while (index < numParticles)
-        {
-            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
-            index++;
-            
-            if (indexData[2] != key) break;
-            if (indexData[1] != hash) continue;
-            
-            uint adjIndex = indexData[0];
-            if (adjIndex == id.x) continue;
-            
-            ParticleData adjParticle = ParticleBuffer[adjIndex];
-            
-            float3 offsetFromAdj = particle.predictedPos - adjParticle.predictedPos;
-            float sqrDist = dot(offsetFromAdj, offsetFromAdj);
-            
-            float avgSmoothRad = max(smoothRad, adjParticle.smoothingRadius);
-            if (sqrDist > avgSmoothRad * avgSmoothRad) continue;
-            
-            float dist = sqrt(sqrDist);
-            float W = WendlandC2(dist, smoothRad);
-            float dw_dr = WendlandC2Derivative(dist, smoothRad);
-            
-            float dw_dh = (3.0f * W / smoothRad) + (dist * dw_dr / smoothRad);
-            sum_dW_dh += particleMass * dw_dh;
-        }
-    }
-    
-    float density = particle.density;
-    float densityTerm = smoothRad / (3.0f * density);
-    float newCorrection = 1.0f - (densityTerm * sum_dW_dh);
-    newCorrection = clamp(newCorrection, 0.5f, 2.0f);
-    
-    float pressure = particle.entropy * pow(abs(density), adiabaticIndex);
-    float pressureTerm = (pressure / (density * density * newCorrection));
-    
-    particle.pressureCorrection = pressureTerm;
-    ParticleBuffer[id.x] = particle;
-}
-
-// kernel 9
 // calculates the pressure force for each particle and updates the velocities
 [numthreads(threadCount,1,1)]
 void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
@@ -817,6 +792,7 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     ParticleData particle = ParticleBuffer[id.x];
     
     float smoothRad = particle.smoothingRadius;
+    float pressure_i = particle.entropy * pow(abs(particle.density), adiabaticIndex);
     float3 pressureForce = float3(0, 0, 0);
     
     int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(smoothRad));
@@ -853,14 +829,17 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             // calculate the pressure force contribution from this neighbour particle
             float3 gradW = WendlandC2Derivative(dist, smoothRad) * dirFromAdj;
             float3 adjGradW = WendlandC2Derivative(dist, adjParticle.smoothingRadius) * dirFromAdj;
-            pressureForce += -particleMass * ((particle.pressureCorrection * gradW) + (adjParticle.pressureCorrection * adjGradW));
+            
+            float3 pressure_j = particle.entropy * pow(abs(adjParticle.density), adiabaticIndex);
+            
+            pressureForce += -particleMass * ((particle.pressureCorrection * pressure_i * gradW) + (adjParticle.pressureCorrection * pressure_j * adjGradW));
         }
     }
     
     ResultantForces[id.x] += pressureForce * pressureMultiplier;
 }
 
-// kernel 10
+// kernel 9
 // calculates the XSPH velocity correction
 // XSPH is a velocity smoothing technique that helps reduce numerical instabilities
 [numthreads(threadCount, 1, 1)]
@@ -914,7 +893,7 @@ void CalculateXSPH(uint3 id : SV_DispatchThreadID)
     ParticleBuffer[id.x] = particle;
 }
 
-// kernel 11
+// kernel 10
 // updates the positions of all particles and checks for collisions with the bounds
 [numthreads(threadCount,1,1)]
 void UpdatePositions(uint3 id : SV_DispatchThreadID)
@@ -929,7 +908,7 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     ParticleBuffer[id.x] = HandleCollisions(particle);
 }
 
-// kernel 12
+// kernel 11
 // run once at the start of the simulation to set the inital entropy values
 [numthreads(threadCount, 1, 1)]
 void InitialiseEntropy(uint3 id : SV_DispatchThreadID)

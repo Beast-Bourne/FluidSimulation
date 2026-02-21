@@ -84,16 +84,15 @@ public class NebulaParticleSimulator : MonoBehaviour
     const int UpdatePredictionsKernel = 0;
     const int gridHashKernel = 1;
     const int smoothingRadiusKernel = 2;
-    const int balsaraFactorKernel = 3;
+    const int correctionTermsKernel = 3;
     const int deltaTimeKernel = 4;
     const int fusionKernel = 5;
     const int updateEntropyKernel = 6;
     const int gravityKernel = 7;
-    const int pressureCorrectionKernel = 8;
-    const int pressureForceKernel = 9;
-    const int XSPHKernel = 10;
-    const int updatePositionKernel = 11;
-    const int initialiseEntropyKernel = 12;
+    const int pressureForceKernel = 8;
+    const int XSPHKernel = 9;
+    const int updatePositionKernel = 10;
+    const int initialiseEntropyKernel = 11;
 
     // other
     NebulaParticleSpawner.ParticleSpawnData spawnData;
@@ -122,18 +121,18 @@ public class NebulaParticleSimulator : MonoBehaviour
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel, XSPHKernel);
-        ComputeHelper.SetBuffer(compute, entropyDataBuffer, "EntropyDataBuffer", updateEntropyKernel, balsaraFactorKernel, deltaTimeKernel, fusionKernel);
+        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel, XSPHKernel);
+        ComputeHelper.SetBuffer(compute, entropyDataBuffer, "EntropyDataBuffer", updateEntropyKernel, correctionTermsKernel, deltaTimeKernel, fusionKernel);
         ComputeHelper.SetBuffer(compute, gravityForceBuffer, "GravityForceBuffer", gravityKernel);
         ComputeHelper.SetBuffer(compute, gravityCorrectionBuffer, "GravityCorrectionBuffer", updatePositionKernel);
         ComputeHelper.SetBuffer(compute, OctreeBuffer, "Octree", gravityKernel);
         ComputeHelper.SetBuffer(compute, SpatialHashes, "SpatialHashes", gravityKernel);
         ComputeHelper.SetBuffer(compute, debugBuffer, "DebugBuffer", gravityKernel, updateEntropyKernel);
         ComputeHelper.SetBuffer(compute, deltaTimeBuffer, "DeltaTimeBuffer", deltaTimeKernel);
-        ComputeHelper.SetBuffer(compute, globalDeltaTimeBuffer, "GlobalDeltaTimeBuffer", deltaTimeKernel, fusionKernel, updateEntropyKernel, updatePositionKernel, UpdatePredictionsKernel, balsaraFactorKernel);
+        ComputeHelper.SetBuffer(compute, globalDeltaTimeBuffer, "GlobalDeltaTimeBuffer", deltaTimeKernel, fusionKernel, updateEntropyKernel, updatePositionKernel, UpdatePredictionsKernel, correctionTermsKernel);
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, pressureForceKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, updateEntropyKernel);
-        ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, XSPHKernel);
-        ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, pressureCorrectionKernel, balsaraFactorKernel, XSPHKernel);
+        ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, XSPHKernel);
+        ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, pressureForceKernel, gravityKernel, updateEntropyKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, XSPHKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -197,8 +196,9 @@ public class NebulaParticleSimulator : MonoBehaviour
         // calculates the smoothing radius and density for each particle
         ComputeHelper.Dispatch(compute, particleCount, smoothingRadiusKernel);
 
-        // BALSARA FACTOR
-        ComputeHelper.Dispatch(compute, particleCount, balsaraFactorKernel);
+        // CORRECTIONS
+        // balsara factor and pressure correction terms for each particle
+        ComputeHelper.Dispatch(compute, particleCount, correctionTermsKernel);
 
         // ADAPTIVE DELTA TIME
         ComputeHelper.Dispatch(compute, particleCount, deltaTimeKernel);
@@ -215,9 +215,6 @@ public class NebulaParticleSimulator : MonoBehaviour
         octreeManager.UpdateOctree(); // update the octree mass values
         ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity using the octree
         gravityReductionManager.PerformReduction(); // perform the reduction to get the gravity force correction value for this frame
-
-        // PRESSURE CORRECTIONS
-        ComputeHelper.Dispatch(compute, particleCount, pressureCorrectionKernel);
 
         // PRESSURE FORCE
         ComputeHelper.Dispatch(compute, particleCount, pressureForceKernel);
