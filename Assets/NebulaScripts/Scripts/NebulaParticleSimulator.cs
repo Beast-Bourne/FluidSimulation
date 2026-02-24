@@ -192,66 +192,51 @@ public class NebulaParticleSimulator : MonoBehaviour
     // Dispatches the compute shader to run the simulation step
     void RunSimulationStep()
     {
-        Profiler.BeginSample("Prediction kernel");
         // PREDICTED POSITIONS
         ComputeHelper.Dispatch(compute, particleCount, UpdatePredictionsKernel);
-        Profiler.EndSample();
 
-        Profiler.BeginSample("Spatial hashing and sorting");
         // SPATIAL HASHING AND SORTING
         ComputeHelper.Dispatch(compute, particleCount, gridHashKernel); // reset the spatial hash buffers
         sorter.SortAndCalcOffsets(); // sort the indices and calculate the offsets
-        Profiler.EndSample();
 
-        Profiler.BeginSample("Smoothing radius and density");
         // SMOOTHING RADIUS AND DENSITY
         // calculates the smoothing radius and density
         ComputeHelper.Dispatch(compute, particleCount, smoothingRadiusKernel);
-        Profiler.EndSample();
 
-        Profiler.BeginSample("Correction terms");
         // CORRECTIONS
         // calculates the balsara factor and pressure correction terms
         ComputeHelper.Dispatch(compute, particleCount, correctionTermsKernel);
-        Profiler.EndSample();
 
-        Profiler.BeginSample("Delta time");
         // ADAPTIVE DELTA TIME
         ComputeHelper.Dispatch(compute, particleCount, deltaTimeKernel);
         timestepManager.PerformReduction();
-        Profiler.EndSample();
 
-        Profiler.BeginSample("Fusion");
         // FUSION
         ComputeHelper.Dispatch(compute, particleCount, fusionKernel);
-        Profiler.EndSample();
 
-        Profiler.BeginSample("Neighbour dependent properties");
         // NEIGHBOUR DPENDENT PROPERTIES
         // updates the entropy and calcualtes the visocity force, pressure force and XSPH correction
         ComputeHelper.Dispatch(compute, particleCount, neighbourDependentPropertiesKernel);
-        Profiler.EndSample();
 
-        Profiler.BeginSample("Gravity and octree");
         // GRAVITY AND OCTREE
+
+        Profiler.BeginSample("Octree update");
         octreeManager.UpdateOctree(); // update the octree mass values
-        ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity using the octree
-        gravityReductionManager.PerformReduction(); // perform the reduction to get the gravity force correction value for this frame
         Profiler.EndSample();
 
-        Profiler.BeginSample("Update positions");
+        Profiler.BeginSample("Gravity kernel");
+        ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity using the octree
+        Profiler.EndSample();
+        gravityReductionManager.PerformReduction(); // perform the reduction to get the gravity force correction value for this frame
+
         // APPLY VELOCITY
         ComputeHelper.Dispatch(compute, particleCount, updatePositionKernel);
-        Profiler.EndSample();
 
-        Profiler.BeginSample("Render kernel");
+        // RENDERING
+        // call the render kernel to write the next frames render data then call to display the current frames render data
+        // the render / write buffers are then swapped (prevents memory stalls from reading and writing to the same buffer at the same time)
         ComputeHelper.Dispatch(compute, particleCount, renderKernel);
-        Profiler.EndSample();
-
-        Profiler.BeginSample("Rendering call");
         display.RenderParticles();
-        Profiler.EndSample();
-
         ComputeHelper.SetBuffer(compute, (useRender1)? renderBuffer1 : renderBuffer2, "RenderBuffer", renderKernel);
         display.SwapRenderBuffer(this, useRender1);
         useRender1 = !useRender1;
@@ -428,7 +413,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.Release(particleBuffer, OctreeBuffer, SpatialHashes, debugBuffer, 
                               ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, 
                               entropyDataBuffer, gravityForceBuffer, gravityCorrectionBuffer,
-                              renderBuffer1, renderBuffer2);
+                              globalDeltaTimeBuffer, renderBuffer1, renderBuffer2);
         
         timestepManager.ReleaseBuffers();
         gravityReductionManager.ReleaseBuffers();
