@@ -1,0 +1,50 @@
+#pragma kernel Reduction
+
+RWStructuredBuffer<float4> MaxInput;
+RWStructuredBuffer<float4> MaxOutput;
+RWStructuredBuffer<float4> MinInput;
+RWStructuredBuffer<float4> MinOutput;
+
+const uint inputSize;
+
+groupshared float3 sharedMax[256]; // an empty array shared between threads in a single group (size is set to be equal to the number of threads per group)
+groupshared float3 sharedMin[256];
+
+// kernel 0
+// performs a reduction on world positions to find the upper and lower bounds
+[numthreads(256,1,1)]
+void Reduction(uint3 id : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
+{
+    float4 maxPos = (id.x < inputSize) ? MaxInput[id.x] : -1e10f;
+    float4 minPos = (id.x < inputSize) ? MinInput[id.x] : 1e10f;
+    sharedMax[tid.x] = maxPos.xyz;
+    sharedMin[tid.x] = minPos.xyz;
+    
+    // ensure all threads have written to shared memory before proceeding
+    GroupMemoryBarrierWithGroupSync();
+    
+    // a parallel sort to find the minimum value in the shared memory array
+    // >>= 1 is a bit-shift right operation, equivalent to dividing by 2 (only for powers of two)
+    // meaning this runs for stride = 128, 64, 32, 16, 8, 4, 2, 1
+    for (uint stride = 128; stride > 0; stride >>= 1)
+    {
+        if (tid.x < stride)
+        {
+            float3 maxPos1 = sharedMax[tid.x];
+            float3 maxPos2 = sharedMax[tid.x + stride];
+            float3 minPos1 = sharedMin[tid.x];
+            float3 minPos2 = sharedMin[tid.x + stride];
+            
+            maxPos1 = max(maxPos1, maxPos2);
+            minPos1 = min(minPos1, minPos2);
+            
+            sharedMax[tid.x] = maxPos1;
+            sharedMin[tid.x] = minPos1;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    
+    // the first thread in the group writes the result to the output buffer
+    if (tid.x == 0) MaxOutput[gid.x] = float4(sharedMax[0], 0.0f);
+    if (tid.x == 0) MinOutput[gid.x] = float4(sharedMin[0], 0.0f);
+}

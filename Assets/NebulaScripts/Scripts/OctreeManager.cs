@@ -7,15 +7,9 @@ public class OctreeManager : MonoBehaviour
     [SerializeField, Range(1, 8)]
     private uint LeafNodeSizeMuliplier;
     [SerializeField]
-    private bool DisplayOctree;
-    [SerializeField]
     private ComputeShader SpatialCompute;
 
     private OctreeNode[] Octree;
-    [HideInInspector]
-    public uint[] SpatialKeys;
-    [HideInInspector]
-    public uint[] SpatialHashes;
     [HideInInspector]
     public float BoundSize;
     [HideInInspector]
@@ -152,7 +146,7 @@ public class OctreeManager : MonoBehaviour
     }
     private void OnDrawGizmos()
     {
-        if (DisplayOctree && Octree != null)
+        if (Octree != null)
         {
             Gizmos.color = Color.white;
 

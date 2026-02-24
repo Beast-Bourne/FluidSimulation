@@ -6582,10 +6582,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   NumOfLayers: 5
   LeafNodeSizeMuliplier: 4
-  DisplayOctree: 1
   SpatialCompute: {fileID: 7200000, guid: c7bb5f47370efe945acee1070e3d0c42, type: 3}
-  SpatialKeys: 
-  SpatialHashes: 
   BoundSize: 0
 --- !u!1 &960516717
 GameObject:
@@ -13925,7 +13922,7 @@ MonoBehaviour:
   particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
   spawnSize: 47
-  VelocitySigma: 0
+  VelocitySigma: 1.5
   randomOffsetStrength: 0.5
 --- !u!1 &1374176186
 GameObject:
@@ -14072,10 +14069,10 @@ MonoBehaviour:
   densityThreshold: 1
   rateCoefficient: 0.025
   energyPerUnitMass: 25000
-  enableDataCollection: 0
+  enableDataCollection: 1
   TimeBetweenSamples: 0.1
   TotalSampleTime: 60
-  logFileName: CombinedKernelsLog
+  logFileName: RenderAndBufferChangesLog
 --- !u!1 &1417070273
 GameObject:
   m_ObjectHideFlags: 0
