@@ -14,6 +14,8 @@ public class NebulaParticleSimulator : MonoBehaviour
 
     // buffers for the compute shader
     public ComputeBuffer particleBuffer { get; private set; }
+    public ComputeBuffer renderBuffer1 { get; private set; }
+    public ComputeBuffer renderBuffer2 { get; private set; }
     ComputeBuffer entropyDataBuffer;
     ComputeBuffer ResultantForceBuffer;
     ComputeBuffer gravityForceBuffer;
@@ -91,7 +93,8 @@ public class NebulaParticleSimulator : MonoBehaviour
     const int neighbourDependentPropertiesKernel = 6;
     const int gravityKernel = 7;
     const int updatePositionKernel = 8;
-    const int initialiseEntropyKernel = 9;
+    const int renderKernel = 9;
+    const int initialiseEntropyKernel = 10;
 
     // other
     NebulaParticleSpawner.ParticleSpawnData spawnData;
@@ -99,6 +102,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     float timeElapsed;
     float totalTimeElapsed;
     List<string> logData = new List<string>();
+    bool useRender1 = true;
 
     // Initialisation. Gets the spawn data from the spawner and sets the initial buffer data before telling the display to initialise
     private void Start()
@@ -117,10 +121,12 @@ public class NebulaParticleSimulator : MonoBehaviour
         globalDeltaTimeBuffer = ComputeHelper.CreateStructuredBuffer<float>(1);
         SpatialDataBuffer = ComputeHelper.CreateStructuredBuffer<SpatialData>(particleCount);
         SpatialOffsetsBuffer = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
+        renderBuffer1 = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
+        renderBuffer2 = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, gravityKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel, neighbourDependentPropertiesKernel);
+        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, gravityKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel, neighbourDependentPropertiesKernel, renderKernel);
         ComputeHelper.SetBuffer(compute, entropyDataBuffer, "EntropyDataBuffer", correctionTermsKernel, deltaTimeKernel, fusionKernel, neighbourDependentPropertiesKernel);
         ComputeHelper.SetBuffer(compute, gravityForceBuffer, "GravityForceBuffer", gravityKernel);
         ComputeHelper.SetBuffer(compute, gravityCorrectionBuffer, "GravityCorrectionBuffer", updatePositionKernel);
@@ -132,6 +138,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, neighbourDependentPropertiesKernel);
         ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, gravityKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, neighbourDependentPropertiesKernel);
         ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, gravityKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, neighbourDependentPropertiesKernel);
+        ComputeHelper.SetBuffer(compute, renderBuffer1, "RenderBuffer", renderKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -237,6 +244,17 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.Dispatch(compute, particleCount, updatePositionKernel);
         Profiler.EndSample();
 
+        Profiler.BeginSample("Render kernel");
+        ComputeHelper.Dispatch(compute, particleCount, renderKernel);
+        Profiler.EndSample();
+
+        Profiler.BeginSample("Rendering call");
+        display.RenderParticles();
+        Profiler.EndSample();
+
+        ComputeHelper.SetBuffer(compute, (useRender1)? renderBuffer1 : renderBuffer2, "RenderBuffer", renderKernel);
+        display.SwapRenderBuffer(this, useRender1);
+        useRender1 = !useRender1;
     }
 
     // Updates the compute settings for the simulation that are intended to be changeable during runtime
@@ -274,6 +292,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("stage2Size", spatialStage2Size);
         compute.SetFloat("stage3Size", spatialStage3Size);
         compute.SetFloat("minSizeFactor", minFactor);
+
+        compute.SetInt("renderMode", (int)display.displayMode);
 
         compute.SetFloat("sigma", 1 / Mathf.PI);
         compute.SetFloat("C2Const", 21.0f/ (16.0f * Mathf.PI));
@@ -384,6 +404,10 @@ public class NebulaParticleSimulator : MonoBehaviour
         sorter.SortAndCalcOffsets();
         ComputeHelper.Dispatch(compute, particleCount, smoothingRadiusKernel);
         ComputeHelper.Dispatch(compute, particleCount, initialiseEntropyKernel); // only run here to initialse entropy based on initial temperature and density
+        
+        // write the initial render data then swap the render buffer
+        ComputeHelper.Dispatch(compute, particleCount, renderKernel);
+        ComputeHelper.SetBuffer(compute, renderBuffer2, "RenderBuffer", renderKernel);
     }
 
     private void HandleInput()
@@ -403,7 +427,8 @@ public class NebulaParticleSimulator : MonoBehaviour
     {
         ComputeHelper.Release(particleBuffer, OctreeBuffer, SpatialHashes, debugBuffer, 
                               ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, 
-                              entropyDataBuffer, gravityForceBuffer, gravityCorrectionBuffer);
+                              entropyDataBuffer, gravityForceBuffer, gravityCorrectionBuffer,
+                              renderBuffer1, renderBuffer2);
         
         timestepManager.ReleaseBuffers();
         gravityReductionManager.ReleaseBuffers();

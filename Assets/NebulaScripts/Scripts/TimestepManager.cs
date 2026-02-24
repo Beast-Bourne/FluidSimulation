@@ -10,10 +10,10 @@ public class TimestepManager
     ComputeBuffer L1; // upto 256^2 (~65500) entries and ~256 outputs into the L2Input buffer
     ComputeBuffer L2; // upto 256 entries and 1 output into the L2Output buffer
     ComputeBuffer L3;
-    ComputeBuffer Result;
 
     // kernel ID
     const int reductionKernel = 0;
+    const int finalWriteKernel = 1;
 
     int L1Size;
     int L2Size;
@@ -33,15 +33,18 @@ public class TimestepManager
         L2Size = (int)Mathf.Ceil(L1Size / 256.0f);
 
         L0 = deltaTimeBuffer;
-        Result = globalDeltaTimeBuffer;
-        InitialiseBuffers();
+
+        InitialiseBuffers(globalDeltaTimeBuffer);
     }
 
-    private void InitialiseBuffers()
+    private void InitialiseBuffers(ComputeBuffer globalDTBuffer)
     {
         L1 = ComputeHelper.CreateStructuredBuffer<float>(256*256);
         L2 = ComputeHelper.CreateStructuredBuffer<float>(256);
         L3 = ComputeHelper.CreateStructuredBuffer<float>(1);
+
+        ComputeHelper.SetBuffer(reductionCompute, L3, "Input", finalWriteKernel);
+        ComputeHelper.SetBuffer(reductionCompute, globalDTBuffer, "Output", finalWriteKernel);
     }
 
     public void PerformReduction()
@@ -64,29 +67,12 @@ public class TimestepManager
         reductionCompute.SetInt("inputSize", L2Size);
         ComputeHelper.Dispatch(reductionCompute, L2Size, reductionKernel);
 
-        float[] dt = new float[1];
-        L3.GetData(dt);
-        float newDt = dt[0];
-
-        float[] oldResult = new float[1];
-        Result.GetData(oldResult);
-        float oldDt = oldResult[0];
-
-        if (oldDt <= 0.0f)
-        {
-            Result.SetData(dt);
-        }
-        else
-        {
-            float finalDt = Mathf.Clamp(newDt, 0.75f*oldDt, 1.2f*oldDt);
-            finalDt = Mathf.Min(finalDt, Time.deltaTime);
-            float[] final = new float[1] { finalDt };
-            Result.SetData(final);
-        }
+        reductionCompute.SetFloat("realDt", Time.deltaTime);
+        ComputeHelper.Dispatch(reductionCompute, 1, finalWriteKernel);
     }
 
     public void ReleaseBuffers()
     {
-        ComputeHelper.Release(L0, L1, L2, L3, Result);
+        ComputeHelper.Release(L0, L1, L2, L3);
     }
 }

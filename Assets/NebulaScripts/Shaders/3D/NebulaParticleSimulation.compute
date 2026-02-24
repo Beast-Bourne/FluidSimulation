@@ -8,6 +8,7 @@
 #pragma kernel NeighbourDependentProperties
 #pragma kernel CalculateGravity
 #pragma kernel UpdatePositions
+#pragma kernel RenderKernel
 #pragma kernel InitialiseEntropy
 
 // Includes
@@ -85,6 +86,9 @@ RWStructuredBuffer<float3> GravityCorrectionBuffer;
 RWStructuredBuffer<float> DeltaTimeBuffer; // holds the per-particle adaptive timestep values
 RWStructuredBuffer<float> GlobalDeltaTimeBuffer; // holds the global delta time value for the current frame (computed on a different shader that's run between kernel 4 and 5)
 
+// render buffer
+RWStructuredBuffer<float4> RenderBuffer;
+
 // debug buffers
 RWStructuredBuffer<float3> DebugBuffer;
 
@@ -141,6 +145,9 @@ const float fusionTempThreshold;
 const float fusionDensityThreshold;
 const float fusionRateCoefficient;
 const float energyPerUnitMass;
+
+// render setting
+const int renderMode; // 0 = density, 1 = velocity, 2 = entropy, 3 = temperature, 4 = smoothing Radius, 5 = Hydrogen ratio
 
 // checks if a particle of the given index has collided with the outer bounds and updates its position and velocity accordingly
 ParticleData HandleCollisions(ParticleData particleData)
@@ -831,6 +838,27 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
 }
 
 // kernel 9
+// write to the render buffer for visualisation
+[numthreads(threadCount, 1, 1)]
+void RenderKernel(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    
+    ParticleData particle = ParticleBuffer[id.x];
+    
+    float values[6];
+    values[0] = particle.density;
+    values[1] = length(particle.velocity);
+    values[2] = particle.entropy;
+    values[3] = particle.temperature;
+    values[4] = particle.smoothingRadius;
+    values[5] = particle.hydroWeight;
+    
+    float4 data = float4(particle.position, values[renderMode]);
+    RenderBuffer[id.x] = data;
+}
+
+// kernel 10
 // run once at the start of the simulation to set the inital entropy values
 [numthreads(threadCount, 1, 1)]
 void InitialiseEntropy(uint3 id : SV_DispatchThreadID)

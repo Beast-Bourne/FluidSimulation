@@ -1,9 +1,11 @@
 #pragma kernel Reduction
+#pragma kernel FinalWrite
 
 RWStructuredBuffer<float> Input;
 RWStructuredBuffer<float> Output;
 
 const uint inputSize;
+const float realDt;
 
 groupshared float minDt[256]; // an empty array shared between threads in a single group (size is set to be equal to the number of threads per group)
 
@@ -36,4 +38,17 @@ void Reduction (uint3 id : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint3 ti
     
     // the first thread in the group writes the result to the output buffer
     if (tid.x == 0) Output[gid.x] = minDt[0];
+}
+
+[numthreads(1, 1, 1)]
+void FinalWrite(uint3 id : SV_DispatchThreadID)
+{
+    float newDt = Input[0];
+    float oldDt = Output[0];
+    
+    if (oldDt <= 0.0f) { Output[0] = newDt; return; }
+    
+    float finalDt = clamp(newDt, 0.75f * oldDt, 1.25f * oldDt);
+    finalDt = min(realDt, finalDt);
+    Output[0] = finalDt;
 }

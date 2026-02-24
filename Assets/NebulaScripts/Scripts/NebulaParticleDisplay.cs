@@ -45,20 +45,25 @@ public class NebulaParticleDisplay : MonoBehaviour
     public void Init(NebulaParticleSimulator sim)
     {
         material = new Material(shader);
-        material.SetBuffer("particles", sim.particleBuffer);
+        material.SetBuffer("particles", sim.renderBuffer1);
 
-        argsBuffer = ComputeHelper.CreateArgsBuffer(mesh, sim.particleBuffer.count);
+        argsBuffer = ComputeHelper.CreateArgsBuffer(mesh, sim.particleCount);
         bounds = new Bounds(Vector3.zero, Vector3.one * 10000);
     }
 
-    // Draws the particles in the scene
-    void LateUpdate()
+    // draws the particles into the scene
+    public void RenderParticles()
     {
         if (shader != null)
         {
             UpdateSettings();
             Graphics.DrawMeshInstancedIndirect(mesh, 0, material, bounds, argsBuffer); // the function responsible for drawing the particles
         }
+    }
+
+    public void SwapRenderBuffer(NebulaParticleSimulator sim, bool use2)
+    {
+        material.SetBuffer("particles", (use2)? sim.renderBuffer2 : sim.renderBuffer1);
     }
 
     // Updates any settings in the material when necessary

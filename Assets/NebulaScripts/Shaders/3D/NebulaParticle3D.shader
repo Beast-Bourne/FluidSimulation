@@ -21,22 +21,7 @@ Shader "Hidden/Particle3D"
 
             #include "UnityCG.cginc"
 
-            struct ParticleData
-            {
-                float3 position;
-                float3 predictedPos;
-                float3 velocity;
-                float density;
-                float smoothingRadius;
-                float internelEnergy;
-                float pressureCorrection;
-                float balsaraFactor;
-                float temperature;
-                float hydroWeight;
-                float meanMolecularWeight;
-            };
-
-            StructuredBuffer<ParticleData> particles;
+            StructuredBuffer<float4> particles;
 
             Texture2D<float4> ColourMap;
             SamplerState linear_clamp_sampler;
@@ -58,42 +43,37 @@ Shader "Hidden/Particle3D"
 
             v2f vert (appdata_full v, uint instanceID : SV_InstanceID)
             {
-                float density = particles[instanceID].density;
-                float densityT = saturate((density - densityRange.x) * densityRange.y);
+                float value = particles[instanceID].w;
+                float densityT = saturate((value - densityRange.x) * densityRange.y);
                 float colT = densityT;
 
                 if (displayType == 1)
                 {
-                    float velocity = length(particles[instanceID].velocity);
-                    float velocityT = saturate((velocity - velocityRange.x) * velocityRange.y);
+                    float velocityT = saturate((value - velocityRange.x) * velocityRange.y);
                     colT = velocityT;
                 }
                 else if (displayType == 2)
                 {
-                    float energy = particles[instanceID].internelEnergy;
-                    float energyT = saturate((energy - energyRange.x) * energyRange.y);
+                    float energyT = saturate((value - energyRange.x) * energyRange.y);
                     colT = energyT;
                 }
                 else if (displayType == 3)
                 {
-                    float temperature = particles[instanceID].temperature;
-                    float tempT = saturate((temperature - tempRange.x) * tempRange.y);
+                    float tempT = saturate((value - tempRange.x) * tempRange.y);
                     colT = tempT;
                 }
                 else if (displayType == 4)
                 {
-                    float smoothing = particles[instanceID].smoothingRadius;
-                    float tempT = saturate((smoothing - smoothingRange.x) * smoothingRange.y);
+                    float tempT = saturate((value - smoothingRange.x) * smoothingRange.y);
                     colT = tempT;
                 }
                 else if (displayType == 5)
                 {
-                    float hydro = particles[instanceID].hydroWeight;
-                    float tempT = saturate((hydro - hydroRange.x) * hydroRange.y);
+                    float tempT = saturate((value - hydroRange.x) * hydroRange.y);
                     colT = tempT;
                 }
 
-                float3 centreWorld = particles[instanceID].position;
+                float3 centreWorld = particles[instanceID].xyz;
 
                 float3 camRight = UNITY_MATRIX_I_V._m00_m01_m02;
                 float3 camUp = UNITY_MATRIX_I_V._m10_m11_m12;

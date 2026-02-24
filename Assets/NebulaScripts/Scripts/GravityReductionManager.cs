@@ -10,13 +10,15 @@ public class GravityReductionManager
     ComputeBuffer L0; // upto 256^3 (~16.7M) entries and 256^2 (~65500) outputs into the L1Input buffer
     ComputeBuffer L1; // upto 256^2 (~65500) entries and ~256 outputs into the L2Input buffer
     ComputeBuffer L2; // upto 256 entries and 1 output into the L2Output buffer
-    ComputeBuffer Result;
+    ComputeBuffer L3;
 
     // kernel ID
     const int reductionKernel = 0;
+    const int finalWriteKernel = 1;
 
     // parameters
     int simParticleCount;
+    float convertFactor;
 
     public GravityReductionManager()
     {
@@ -27,14 +29,21 @@ public class GravityReductionManager
     {
         simParticleCount = particleCount;
         L0 = gravityForceBuffer;
-        Result = gravityCorrectionBuffer;
-        InitialiseBuffers();
+
+        convertFactor = -1.0f / (float)simParticleCount;
+        reductionCompute.SetFloat("conversionFactor", convertFactor);
+
+        InitialiseBuffers(gravityCorrectionBuffer);
     }
 
-    private void InitialiseBuffers()
+    private void InitialiseBuffers(ComputeBuffer correctionBuffer)
     {
         L1 = ComputeHelper.CreateStructuredBuffer<float3>(256 * 256);
         L2 = ComputeHelper.CreateStructuredBuffer<float3>(256);
+        L3 = ComputeHelper.CreateStructuredBuffer<float3>(1);
+
+        ComputeHelper.SetBuffer(reductionCompute, L3, "Input", finalWriteKernel);
+        ComputeHelper.SetBuffer(reductionCompute, correctionBuffer, "Output", finalWriteKernel);
     }
 
     public void PerformReduction()
@@ -54,22 +63,16 @@ public class GravityReductionManager
 
         // set buffers and dispatch reduction for L2 -> L3. (L2 size <= 256, L3 size = 1)
         ComputeHelper.SetBuffer(reductionCompute, L2, "Input", reductionKernel);
-        ComputeHelper.SetBuffer(reductionCompute, Result, "Output", reductionKernel);
+        ComputeHelper.SetBuffer(reductionCompute, L3, "Output", reductionKernel);
         int L2Size = (int)Mathf.Ceil(L1Size / 256.0f);
         reductionCompute.SetInt("inputSize", L2Size);
         ComputeHelper.Dispatch(reductionCompute, L2Size, reductionKernel);
 
-        float3[] result = new float3[1];
-        Result.GetData(result);
-        float3 totalDrift = result[0];
-        totalDrift = -1.0f * (totalDrift / simParticleCount);
-
-        result[0] = totalDrift;
-        Result.SetData(result);
+        ComputeHelper.Dispatch(reductionCompute, 1, finalWriteKernel);
     }
 
     public void ReleaseBuffers()
     {
-        ComputeHelper.Release(L0, L1, L2, Result);
+        ComputeHelper.Release(L0, L1, L2, L3);
     }
 }
