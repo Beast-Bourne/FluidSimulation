@@ -15,6 +15,9 @@ public class TimestepManager
     // kernel ID
     const int reductionKernel = 0;
 
+    int L1Size;
+    int L2Size;
+
     // parameters
     int simParticleCount;
 
@@ -26,6 +29,9 @@ public class TimestepManager
     public void SetBuffers(ComputeBuffer deltaTimeBuffer, ComputeBuffer globalDeltaTimeBuffer, int particleCount)
     {
         simParticleCount = particleCount;
+        L1Size = (int)Mathf.Ceil(simParticleCount / 256.0f);
+        L2Size = (int)Mathf.Ceil(L1Size / 256.0f);
+
         L0 = deltaTimeBuffer;
         Result = globalDeltaTimeBuffer;
         InitialiseBuffers();
@@ -49,14 +55,12 @@ public class TimestepManager
         // set buffers and dispatch reduction for L1 -> L2. (L1 size <= 256^2, L2 size <= 256)
         ComputeHelper.SetBuffer(reductionCompute, L1, "Input", reductionKernel);
         ComputeHelper.SetBuffer(reductionCompute, L2, "Output", reductionKernel);
-        int L1Size = (int)Mathf.Ceil(simParticleCount/256.0f);
         reductionCompute.SetInt("inputSize", L1Size);
         ComputeHelper.Dispatch(reductionCompute, L1Size, reductionKernel);
 
         // set buffers and dispatch reduction for L2 -> L3. (L2 size <= 256, L3 size = 1)
         ComputeHelper.SetBuffer(reductionCompute, L2, "Input", reductionKernel);
         ComputeHelper.SetBuffer(reductionCompute, L3, "Output", reductionKernel);
-        int L2Size = (int)Mathf.Ceil(L1Size / 256.0f);
         reductionCompute.SetInt("inputSize", L2Size);
         ComputeHelper.Dispatch(reductionCompute, L2Size, reductionKernel);
 

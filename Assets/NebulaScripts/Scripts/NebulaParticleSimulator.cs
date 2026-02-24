@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using Unity.Mathematics;
+using UnityEngine.Profiling;
 using UnityEngine;
 
 public class NebulaParticleSimulator : MonoBehaviour
@@ -176,46 +177,65 @@ public class NebulaParticleSimulator : MonoBehaviour
         if (isPaused) return;
         if (Time.frameCount < 10) return; // skip first few frames to avoid a disproportionate delta time
 
-        UpdateComputeSettings();
+        //UpdateComputeSettings();
         RunSimulationStep();
     }
 
+    // NOTE: In the gravity and deltaTime reduction steps, those functions read buffer data back to the CPU which is whats taking the longest amount of time when running this (time on the CPU, not including GPU)
     // Dispatches the compute shader to run the simulation step
     void RunSimulationStep()
     {
+        Profiler.BeginSample("Prediction kernel");
         // PREDICTED POSITIONS
         ComputeHelper.Dispatch(compute, particleCount, UpdatePredictionsKernel);
+        Profiler.EndSample();
 
+        Profiler.BeginSample("Spatial hashing and sorting");
         // SPATIAL HASHING AND SORTING
         ComputeHelper.Dispatch(compute, particleCount, gridHashKernel); // reset the spatial hash buffers
         sorter.SortAndCalcOffsets(); // sort the indices and calculate the offsets
+        Profiler.EndSample();
 
+        Profiler.BeginSample("Smoothing radius and density");
         // SMOOTHING RADIUS AND DENSITY
         // calculates the smoothing radius and density
         ComputeHelper.Dispatch(compute, particleCount, smoothingRadiusKernel);
+        Profiler.EndSample();
 
+        Profiler.BeginSample("Correction terms");
         // CORRECTIONS
         // calculates the balsara factor and pressure correction terms
         ComputeHelper.Dispatch(compute, particleCount, correctionTermsKernel);
+        Profiler.EndSample();
 
+        Profiler.BeginSample("Delta time");
         // ADAPTIVE DELTA TIME
         ComputeHelper.Dispatch(compute, particleCount, deltaTimeKernel);
         timestepManager.PerformReduction();
+        Profiler.EndSample();
 
+        Profiler.BeginSample("Fusion");
         // FUSION
         ComputeHelper.Dispatch(compute, particleCount, fusionKernel);
+        Profiler.EndSample();
 
+        Profiler.BeginSample("Neighbour dependent properties");
         // NEIGHBOUR DPENDENT PROPERTIES
         // updates the entropy and calcualtes the visocity force, pressure force and XSPH correction
         ComputeHelper.Dispatch(compute, particleCount, neighbourDependentPropertiesKernel);
+        Profiler.EndSample();
 
+        Profiler.BeginSample("Gravity and octree");
         // GRAVITY AND OCTREE
         octreeManager.UpdateOctree(); // update the octree mass values
         ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity using the octree
         gravityReductionManager.PerformReduction(); // perform the reduction to get the gravity force correction value for this frame
+        Profiler.EndSample();
 
+        Profiler.BeginSample("Update positions");
         // APPLY VELOCITY
         ComputeHelper.Dispatch(compute, particleCount, updatePositionKernel);
+        Profiler.EndSample();
 
     }
 

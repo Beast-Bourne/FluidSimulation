@@ -809,11 +809,25 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     
     ParticleData particle = ParticleBuffer[id.x];
+    float dt = GlobalDeltaTimeBuffer[0];
     
-    particle.velocity += (ResultantForces[id.x] + GravityCorrectionBuffer[0]) * GlobalDeltaTimeBuffer[0];
-    particle.position += particle.velocity * GlobalDeltaTimeBuffer[0];
+    float3 vel = particle.velocity;
+    float3 pos = particle.position;
     
-    ParticleBuffer[id.x] = HandleCollisions(particle);
+    vel += (ResultantForces[id.x] + GravityCorrectionBuffer[0]) * dt;
+    pos += vel * dt;
+    
+    const float3 halfSize = 0.5f * boundSize;
+    float3 edgeDist = halfSize - abs(pos);
+    
+    float3 mask = step(edgeDist, 0);
+    vel *= lerp(1, -damping, mask);
+    pos = clamp(pos, -halfSize, halfSize);
+    
+    particle.position = pos;
+    particle.velocity = vel;
+    
+    ParticleBuffer[id.x] = particle;
 }
 
 // kernel 9
