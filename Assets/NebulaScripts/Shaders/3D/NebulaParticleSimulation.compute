@@ -18,10 +18,8 @@
 struct ParticleData
 {
     float3 position;
-    float3 predictedPos;
     float3 velocity;
     float density;
-    float smoothingRadius;
     float entropy;
     float pressureCorrection;
     float balsaraFactor;
@@ -75,6 +73,7 @@ static const int threadCount = 128;
 
 // property buffers
 RWStructuredBuffer<ParticleData> ParticleBuffer;
+RWStructuredBuffer<float4> PositionBuffer;
 RWStructuredBuffer<ParticleEntropyData> EntropyDataBuffer;
 RWStructuredBuffer<float3> ResultantForces;
 
@@ -123,7 +122,6 @@ const float softeningLength;
 // smoothing and pressure constants
 const float pressureMultiplier;
 const float adiabaticIndex;
-const bool useDynamicSmoothingRadius;
 
 // energy constants
 const float initialTemperature;
@@ -226,7 +224,7 @@ float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint partic
             uint adjacentIndex = indexData[0];
             if (adjacentIndex == particleIndex) continue; // skips self interaction
             
-            float3 offsetFromAdjacent = particlePos - ParticleBuffer[adjacentIndex].predictedPos;
+            float3 offsetFromAdjacent = particlePos - PositionBuffer[adjacentIndex].xyz;
             float sqrDist = dot(offsetFromAdjacent, offsetFromAdjacent);
             if (sqrDist <= 0) continue; // skips calculations to prevent a divide by zero error
             
@@ -373,7 +371,7 @@ float CalculateParticlesDensity(float3 predPos, float smoothRad, uint particleIn
             
             if (adjacentIndex == particleIndex) { density += (WendlandC2(0, smoothRad) * particleMass); continue; }
             
-            float3 offsetFromAdjacent = predPos - ParticleBuffer[adjacentIndex].predictedPos;
+            float3 offsetFromAdjacent = predPos - PositionBuffer[adjacentIndex].xyz;
             float sqrDist = dot(offsetFromAdjacent, offsetFromAdjacent);
             
             if (sqrDist > smoothRad * smoothRad) continue; // if the particle is outside the smoothing radius then skip it
@@ -426,8 +424,8 @@ void UpdatePredictions(uint3 id : SV_DispatchThreadID)
     {
         PredPos.z = halfSize.z * sign(PredPos.z);
     }
-    particle.predictedPos = PredPos;
-    ParticleBuffer[id.x] = particle;
+    
+    PositionBuffer[id.x].xyz = PredPos;
 }
 
 // kernel 1
@@ -440,7 +438,7 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     SpatialOffsetDataBuffer[id.x] = uint3(numParticles, numParticles, numParticles); // reset the offsets
     uint index = id.x;
-    float3 predPos = ParticleBuffer[index].predictedPos; // get predicted position
+    float3 predPos = PositionBuffer[index].xyz; // get predicted position
     
     // spatial hash stage 1
     int3 gridPos = GetGridPos3D(predPos, stage1Size);
@@ -475,29 +473,27 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     ParticleData particle = ParticleBuffer[id.x];
     
-    if (!useDynamicSmoothingRadius)
-    {
-        particle.smoothingRadius = stage1Size;
-        particle.density = CalculateParticlesDensity(particle.predictedPos, stage1Size, id.x);
-        ParticleBuffer[id.x] = particle;
-        return;
-    }
-    
-    float smoothRad = particle.smoothingRadius;
+    float3 predPos = PositionBuffer[id.x].xyz;
+    float originSmoothRad = PositionBuffer[id.x].w;
+    float smoothRad = originSmoothRad;
     float density = 0.0f;
     
     for (int i = 0; i < 3; i++)
     {
-        density = CalculateParticlesDensity(particle.predictedPos, smoothRad, id.x);
+        density = CalculateParticlesDensity(predPos, smoothRad, id.x);
         density = max(density, 1e-8);
         float targetSmoothRad = GetTargetSmoothRad(density);
         smoothRad = lerp(smoothRad, targetSmoothRad, 0.5f);
     }
     
-    smoothRad = lerp(particle.smoothingRadius, smoothRad, 0.005f);
-    particle.smoothingRadius = clamp(smoothRad, stage1Size * minSizeFactor, stage3Size);
-    particle.density = CalculateParticlesDensity(particle.predictedPos, smoothRad, id.x);
+    smoothRad = lerp(originSmoothRad, smoothRad, 0.005f);
+    smoothRad = clamp(smoothRad, stage1Size * minSizeFactor, stage3Size);
+    
+    particle.density = CalculateParticlesDensity(predPos, smoothRad, id.x);
+    
+    // buffer writes
     ParticleBuffer[id.x] = particle;
+    PositionBuffer[id.x].w = smoothRad;
 }
 
 // kernel 3
@@ -511,8 +507,9 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
     ParticleData particle = ParticleBuffer[id.x];
     ParticleEntropyData entropyData = EntropyDataBuffer[id.x];
     
-    float smoothRad = particle.smoothingRadius;
-    int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(smoothRad));
+    float3 predPos = PositionBuffer[id.x].xyz;
+    float smoothRad = PositionBuffer[id.x].w;
+    int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(smoothRad));
     
     // variables for storing neighbour contributions
     float divV = 0.0f;
@@ -540,11 +537,12 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
             if (adjIndex == id.x) continue;
             
             ParticleData adjParticle = ParticleBuffer[adjIndex];
+            float3 adjPredPos = PositionBuffer[adjIndex].xyz;
+            float adjSmoothRad = PositionBuffer[adjIndex].w;
             
-            float3 offsetToAdj = particle.predictedPos - adjParticle.predictedPos;
+            float3 offsetToAdj = predPos - adjPredPos;
             float sqrDistToAdj = dot(offsetToAdj, offsetToAdj);
             
-            float adjSmoothRad = adjParticle.smoothingRadius;
             float smoothRadValidator = max(smoothRad, adjSmoothRad);
             if (sqrDistToAdj > smoothRadValidator * smoothRadValidator) continue;
             
@@ -611,10 +609,9 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
 void CalculateAdaptiveTimestep(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
-    ParticleData particle = ParticleBuffer[id.x];
     ParticleEntropyData entropyData = EntropyDataBuffer[id.x];
     
-    float smoothRad = particle.smoothingRadius;
+    float smoothRad = PositionBuffer[id.x].w;
     float divV = entropyData.divV;
     float viscBeta = entropyData.alpha * 2.0f;
     
@@ -666,9 +663,10 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
     ParticleData particle = ParticleBuffer[id.x];
     ParticleEntropyData entropyData = EntropyDataBuffer[id.x];
     
-    float smoothRad = particle.smoothingRadius;
+    float3 predPos = PositionBuffer[id.x].xyz;
+    float smoothRad = PositionBuffer[id.x].w;
     
-    int3 originGridPos = GetGridPos3D(particle.predictedPos, GetTargetLayerSize(10.5f));
+    int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(10.5f));
     
     // variables for storing neighbour contributions
     float viscTerm = 0.0;
@@ -702,11 +700,13 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
             
             ParticleData adjParticle = ParticleBuffer[adjIndex];
             ParticleEntropyData adjEntropyData = EntropyDataBuffer[adjIndex];
+            float3 adjPredPos = PositionBuffer[adjIndex].xyz;
+            float adjSmoothRad = PositionBuffer[adjIndex].w;
             
-            float3 offsetFromAdj = particle.predictedPos - adjParticle.predictedPos;
+            float3 offsetFromAdj = predPos - adjPredPos;
             float sqrDistToAdj = dot(offsetFromAdj, offsetFromAdj);
             
-            float smoothRadValidator = max(smoothRad, adjParticle.smoothingRadius);
+            float smoothRadValidator = max(smoothRad, adjSmoothRad);
             if (sqrDistToAdj > smoothRadValidator * smoothRadValidator) continue;
             
             // compute properties for the interaction
@@ -714,11 +714,11 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
             float3 dirFromAdj = offsetFromAdj / max(dist, 1e-6);
             
             float w_i = WendlandC2(dist, smoothRad);
-            float w_j = WendlandC2(dist, adjParticle.smoothingRadius);
+            float w_j = WendlandC2(dist, adjSmoothRad);
             float w_ij = 0.5f * (w_i + w_j);
             
             float3 gradW_i = WendlandC2Derivative(dist, smoothRad) * dirFromAdj;
-            float3 gradW_j = WendlandC2Derivative(dist, adjParticle.smoothingRadius) * dirFromAdj;
+            float3 gradW_j = WendlandC2Derivative(dist, adjSmoothRad) * dirFromAdj;
             float3 gradW_ij = 0.5 * (gradW_i + gradW_j);
             
             float densFactor = pow(abs(particle.density), adiabaticIndex - 1);
@@ -742,7 +742,7 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
                 float avgAlpha = 0.5f * (entropyData.alpha + adjEntropyData.alpha);
                 float avgBeta = 2.0f * avgAlpha;
                 
-                float avgSmoothRad = 0.5f * (smoothRad + adjParticle.smoothingRadius);
+                float avgSmoothRad = 0.5f * (smoothRad + adjSmoothRad);
                 float avgDensity = 0.5f * (particle.density + adjParticle.density);
                 float massFactor = (avgSmoothRad * relVelAlongOffset) / (dist + (viscEpsilon * avgSmoothRad * avgSmoothRad));
                 massFactor = clamp(massFactor, -5.0f, 0.0f);
@@ -798,10 +798,11 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     
     float3 gravityAccel = float3(0, 0, 0);
+    float3 predPos = PositionBuffer[id.x].xyz;
     
     for (int i = 1; i < 9; i++)
     {
-        gravityAccel += GetGravityAccelFromOctreeChildren(i, ParticleBuffer[id.x].predictedPos, id.x);
+        gravityAccel += GetGravityAccelFromOctreeChildren(i, predPos, id.x);
     }
     
     ResultantForces[id.x] += gravityAccel;
@@ -851,7 +852,7 @@ void RenderKernel(uint3 id : SV_DispatchThreadID)
     values[1] = length(particle.velocity);
     values[2] = particle.entropy;
     values[3] = particle.temperature;
-    values[4] = particle.smoothingRadius;
+    values[4] = PositionBuffer[id.x].w;
     values[5] = particle.hydroWeight;
     
     float4 data = float4(particle.position, values[renderMode]);

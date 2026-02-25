@@ -14,6 +14,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
     // buffers for the compute shader
     public ComputeBuffer particleBuffer { get; private set; }
+    public ComputeBuffer positionBuffer { get; private set; }
     public ComputeBuffer renderBuffer1 { get; private set; }
     public ComputeBuffer renderBuffer2 { get; private set; }
     ComputeBuffer entropyDataBuffer;
@@ -47,7 +48,6 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float spatialStage1Size;
     public float spatialStage2Size;
     public float spatialStage3Size;
-    public bool useDynamicSmoothingRadius;
 
     [Header("Gravity Settings")]
     public float gravity;
@@ -110,6 +110,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         spawnData = spawner.GetSpawnData();
         particleCount = spawnData.positions.Length;
         particleBuffer = ComputeHelper.CreateStructuredBuffer<ParticleData>(particleCount);
+        positionBuffer = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         entropyDataBuffer = ComputeHelper.CreateStructuredBuffer<ParticleEntropyData>(particleCount);
         gravityForceBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
         gravityCorrectionBuffer = ComputeHelper.CreateStructuredBuffer<float3>(1);
@@ -126,7 +127,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
-        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, gridHashKernel, gravityKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, initialiseEntropyKernel, fusionKernel, deltaTimeKernel, neighbourDependentPropertiesKernel, renderKernel);
+        ComputeHelper.SetBuffer(compute, particleBuffer, "ParticleBuffer", UpdatePredictionsKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, initialiseEntropyKernel, fusionKernel, neighbourDependentPropertiesKernel, renderKernel);
+        ComputeHelper.SetBuffer(compute, positionBuffer, "PositionBuffer", UpdatePredictionsKernel, gridHashKernel, gravityKernel, smoothingRadiusKernel, correctionTermsKernel, deltaTimeKernel, neighbourDependentPropertiesKernel, renderKernel);
         ComputeHelper.SetBuffer(compute, entropyDataBuffer, "EntropyDataBuffer", correctionTermsKernel, deltaTimeKernel, fusionKernel, neighbourDependentPropertiesKernel);
         ComputeHelper.SetBuffer(compute, gravityForceBuffer, "GravityForceBuffer", gravityKernel);
         ComputeHelper.SetBuffer(compute, gravityCorrectionBuffer, "GravityCorrectionBuffer", updatePositionKernel);
@@ -255,7 +257,6 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("pressureMultiplier", pressureMultiplier);
         compute.SetFloat("viscocityMultiplier", viscocityMultiplier);
         compute.SetFloat("adiabaticIndex", adiabaticIndex);
-        compute.SetBool("useDynamicSmoothingRadius", useDynamicSmoothingRadius);
 
         compute.SetFloat("initialTemperature", InitialTemperature);
         compute.SetFloat("protonMass", ProtonMass);
@@ -294,6 +295,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         ParticleData[] allParticles = new ParticleData[particleCount];
         ParticleEntropyData[] allEntropyData = new ParticleEntropyData[particleCount];
+        float4[] allPositions = new float4[particleCount];
         float3[] debugData = new float3[allParticles.Length];
 
         for (int i = 0; i < allParticles.Length; i++)
@@ -303,11 +305,9 @@ public class NebulaParticleSimulator : MonoBehaviour
             ParticleData particle = new ParticleData
             {
                 position = spawnData.positions[i],
-                predictedPos = spawnData.positions[i],
                 velocity = new float3(0.0f, 0.0f, 0.0f),// spawnData.velocities[i],
                 entropy = 0.0f,
                 density = 0.0f,
-                smoothingRadius = spatialStage3Size,
                 pressureCorrection = 0.0f,
                 balsaraFactor = 1.0f,
                 temperature = InitialTemperature,
@@ -324,11 +324,15 @@ public class NebulaParticleSimulator : MonoBehaviour
                 fusionEnergyRate = 0.0f
             };
             allEntropyData[i] = entropyData;
+
+            float4 pos = new float4(spawnData.positions[i].x, spawnData.positions[i].y, spawnData.positions[i].z, spatialStage3Size);
+            allPositions[i] = pos;
         }
 
 
         particleBuffer.SetData(allParticles);
         entropyDataBuffer.SetData(allEntropyData);
+        positionBuffer.SetData(allPositions);
         debugBuffer.SetData(debugData);
 
         // temporary to test delta time buffer
@@ -413,7 +417,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.Release(particleBuffer, OctreeBuffer, SpatialHashes, debugBuffer, 
                               ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, 
                               entropyDataBuffer, gravityForceBuffer, gravityCorrectionBuffer,
-                              globalDeltaTimeBuffer, renderBuffer1, renderBuffer2);
+                              globalDeltaTimeBuffer, renderBuffer1, renderBuffer2, positionBuffer);
         
         timestepManager.ReleaseBuffers();
         gravityReductionManager.ReleaseBuffers();
@@ -438,10 +442,8 @@ public struct SpatialData
 public struct  ParticleData
 {
     public Vector3 position;
-    public Vector3 predictedPos;
     public Vector3 velocity;
     public float density;
-    public float smoothingRadius;
     public float entropy;
     public float pressureCorrection;
     public float balsaraFactor;
