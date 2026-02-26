@@ -52,6 +52,18 @@ struct OctreeNode
     uint spatialStartIndex;
 };
 
+struct NewOctreeNode
+{
+    uint leftChild;
+    uint rightChild;
+    
+    uint firstParticle;
+    uint particleCount;
+    
+    float size;
+    float4 centerOfMass;
+};
+
 // NOTE: change to using 3 uint3s instead of 9 uints for better memory access patterns
 // look into: currently is 36 bytes but memory fetches in 32 byte chunks
 struct SpatialData
@@ -98,8 +110,9 @@ RWStructuredBuffer<SpatialData> SpatialDataBuffer;
 RWStructuredBuffer<uint3> SpatialOffsetDataBuffer; // .x is the offset for stage 1, .y is the offset for stage 2, and .z is the offset for stage 3
 
 // octree buffers
-RWStructuredBuffer<OctreeNode> Octree;
-RWStructuredBuffer<uint> SpatialHashes;
+//RWStructuredBuffer<OctreeNode> Octree;
+//RWStructuredBuffer<uint> SpatialHashes;
+RWStructuredBuffer<NewOctreeNode> NewOctreeBuffer;
 
 // spatial hashing constants
 const float stage1Size;
@@ -110,7 +123,7 @@ const float minSizeFactor;
 // general constants
 const uint numParticles;
 const float CFL;
-const float3 boundSize;
+//const float3 boundSize;
 const float damping;
 
 // gravity constants
@@ -147,36 +160,6 @@ const float energyPerUnitMass;
 // render setting
 const int renderMode; // 0 = density, 1 = velocity, 2 = entropy, 3 = temperature, 4 = smoothing Radius, 5 = Hydrogen ratio
 
-// checks if a particle of the given index has collided with the outer bounds and updates its position and velocity accordingly
-ParticleData HandleCollisions(ParticleData particleData)
-{
-    float3 pos = particleData.position;
-    float3 vel = particleData.velocity;
-    
-    const float3 halfSize = 0.5f * boundSize;
-    float3 edgeDist = halfSize - abs(pos);
-    
-    if (edgeDist.x < 0)
-    {
-        pos.x = halfSize.x * sign(pos.x);
-        vel.x = -vel.x * damping;
-    }
-    if (edgeDist.y < 0)
-    {
-        pos.y = halfSize.y * sign(pos.y);
-        vel.y = -vel.y * damping;
-    }
-    if (edgeDist.z < 0)
-    {
-        pos.z = halfSize.z * sign(pos.z);
-        vel.z = -vel.z * damping;
-    }
-    
-    particleData.position = pos;
-    particleData.velocity = vel;
-    return particleData;
-}
-
 uint3 GetIndexDataFromLayer(uint targetIndex, uint targetLayer)
 {
     if (targetLayer == 1)
@@ -200,6 +183,7 @@ uint GetSpatialOffsetFromLayer(uint key, uint targetLayer)
     else return SpatialOffsetDataBuffer[key].z;
 }
 
+/*
 float3 CalcGravAccelFromLeafNode(uint nodeIndex, float3 particlePos, uint particleIndex)
 {
     float3 gravAccel = float3(0, 0, 0);
@@ -290,6 +274,7 @@ float3 GetGravityAccelFromOctreeChildren(uint parentIndex, float3 particlePos, u
     
     return gravAccel;
 }
+*/
 
 float LambdaFunction(float temp)
 {
@@ -409,6 +394,7 @@ void UpdatePredictions(uint3 id : SV_DispatchThreadID)
     
     float3 PredPos = particle.position + (particle.velocity * GlobalDeltaTimeBuffer[0] * 0.2f);
     
+    /*
     const float3 halfSize = 0.5f * boundSize;
     float3 edgeDist = halfSize - abs(PredPos);
     
@@ -424,6 +410,7 @@ void UpdatePredictions(uint3 id : SV_DispatchThreadID)
     {
         PredPos.z = halfSize.z * sign(PredPos.z);
     }
+    */
     
     PositionBuffer[id.x].xyz = PredPos;
 }
@@ -800,13 +787,55 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     float3 gravityAccel = float3(0, 0, 0);
     float3 predPos = PositionBuffer[id.x].xyz;
     
-    for (int i = 1; i < 9; i++)
+    float sqrSoftening = softeningLength * softeningLength;
+    
+    uint stack[64]; // stack for storing indices to visit. This gets around the issue of recursion in compute shaders
+    uint stackPtr = 0;
+    
+    stack[0] = 0;
+    stackPtr++;
+    
+    while (stackPtr > 0)
     {
-        gravityAccel += GetGravityAccelFromOctreeChildren(i, predPos, id.x);
+        stackPtr -= 1;
+        uint index = stack[stackPtr];
+        NewOctreeNode node = NewOctreeBuffer[index];
+        
+        float3 offset = node.centerOfMass.xyz - predPos;
+        float sqrDist = max(dot(offset, offset), sqrSoftening);
+        float dist = sqrt(sqrDist);
+        float3 dir = offset / dist;
+        
+        // if its a leaf node then just calculate the gravity accel
+        if (node.particleCount == 1)
+        {
+            float accelMag = gravity * node.centerOfMass.w * pow(sqrDist, -1.5);
+            gravityAccel += dir * accelMag;
+        }
+        
+        // if its an internal node then check the barnes hut criteria
+        float size = node.size;
+        float theta = size / dist;
+        
+        // if it passes the criteria then calculate the gravity accel using the center of mass properties of the node
+        if (theta < BarnesHutTheta)
+        {
+            float accelMag = gravity * node.centerOfMass.w * pow(sqrDist, -1.5);
+            gravityAccel += dir * accelMag;
+        }
+        // otherwise add the children to the stack to be processed
+        else
+        {
+            stack[stackPtr] = node.leftChild;
+            stackPtr++;
+            stack[stackPtr] = node.rightChild;
+            stackPtr++;
+        }
     }
     
     ResultantForces[id.x] += gravityAccel;
     GravityForceBuffer[id.x] = gravityAccel;
+    DebugBuffer[id.x] = gravityAccel;
 }
 
 // kernel 8
@@ -825,13 +854,17 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     vel += (ResultantForces[id.x] + GravityCorrectionBuffer[0]) * dt;
     pos += vel * dt;
     
+    /*
     const float3 halfSize = 0.5f * boundSize;
     float3 edgeDist = halfSize - abs(pos);
     
     float3 mask = step(edgeDist, 0);
     vel *= lerp(1, -damping, mask);
     pos = clamp(pos, -halfSize, halfSize);
-    
+     
+    particle.position = pos;
+    particle.velocity = vel;
+    */
     particle.position = pos;
     particle.velocity = vel;
     

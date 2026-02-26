@@ -21,14 +21,12 @@ public class OctreeScript
 
     ComputeBuffer mortonBuffer;
     ComputeBuffer binaryTreeBuffer;
-    ComputeBuffer depthBuffer;
 
     // kernel ID
     const int reductionKernel = 0;
     const int mortonKeyKernel = 0;
     const int sortKernel = 1;
     const int BuildBinaryTreeKernel = 2;
-    const int ComputeMassKernel = 3;
 
     // parameters
     int simParticleCount;
@@ -53,7 +51,7 @@ public class OctreeScript
         octreeCompute.SetInt("particleCount", simParticleCount);
         octreeCompute.SetInt("nodeCount", nodeCount);
         octreeCompute.SetFloat("particleMass", mass);
-        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel, ComputeMassKernel);
+        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
         ComputeHelper.SetBuffer(octreeCompute, positionBuffer, "PositionBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
         ComputeHelper.SetBuffer(octreeCompute, mortonBuffer, "MortonBuffer", mortonKeyKernel, sortKernel, BuildBinaryTreeKernel);
 
@@ -70,11 +68,8 @@ public class OctreeScript
         minL2 = ComputeHelper.CreateStructuredBuffer<float4>(256);
         minL3 = ComputeHelper.CreateStructuredBuffer<float4>(1);
 
-        depthBuffer = ComputeHelper.CreateStructuredBuffer<uint>(nodeCount);
-
         ComputeHelper.SetBuffer(octreeCompute, maxL3, "MaxBoundBuffer", mortonKeyKernel);
         ComputeHelper.SetBuffer(octreeCompute, minL3, "MinBoundBuffer", mortonKeyKernel);
-        ComputeHelper.SetBuffer(octreeCompute, depthBuffer, "DepthBuffer", BuildBinaryTreeKernel, ComputeMassKernel);
     }
 
     public void ConstructOctree()
@@ -83,7 +78,6 @@ public class OctreeScript
         sortMortonKeys();
 
         ComputeHelper.Dispatch(octreeCompute, simParticleCount, BuildBinaryTreeKernel);
-        ComputeMasses();
     }
 
     private void PerformReduction()
@@ -133,16 +127,6 @@ public class OctreeScript
         }
     }
 
-    // NOTE: this is terrible, make it better
-    public void ComputeMasses()
-    {
-        for (int i = 1; i < 31; i++)
-        {
-            octreeCompute.SetInt("depthPass", i);
-            ComputeHelper.Dispatch(octreeCompute, simParticleCount-1, ComputeMassKernel);
-        }
-    }
-
     private void DebugLog()
     {
         int totalNodes = (simParticleCount * 2) - 1;
@@ -154,7 +138,7 @@ public class OctreeScript
 
     public void ReleaseBuffers()
     {
-        ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3, depthBuffer);
+        ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3);
     }
 }
 

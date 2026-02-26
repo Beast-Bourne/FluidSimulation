@@ -1,7 +1,6 @@
 #pragma kernel MortonKeyKernel
 #pragma kernel SortKernel
 #pragma kernel BuildBinaryTreeKernel
-#pragma kernel ComputeMassKernel
 
 struct Node
 {
@@ -19,7 +18,6 @@ struct Node
 StructuredBuffer<float4> PositionBuffer; // .xyz are the positions, .w is the smoothing radius (unused in this shader)
 RWStructuredBuffer<uint2> MortonBuffer; // .xyz are the morton keys, .w is the index of the particle
 RWStructuredBuffer<Node> OctreeBuffer;
-RWStructuredBuffer<uint> DepthBuffer;
 
 StructuredBuffer<float4> MaxBoundBuffer; // .xyz is the max bound, .w is unused
 StructuredBuffer<float4> MinBoundBuffer; // .xyz is the min bound, .w is unused
@@ -31,8 +29,6 @@ const float particleMass;
 const uint groupWidth;
 const uint groupHeight;
 const uint stepIndex;
-
-const uint depthPass;
 
 uint ExpandBits(uint v)
 {
@@ -142,7 +138,6 @@ void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
     leafNode.size = 0.0f; // size is not used for leaf nodes
     leafNode.centerOfMass = float4(PositionBuffer[particleIndex].xyz, particleMass);
     OctreeBuffer[i + particleCount - 1] = leafNode; // store the leaf node in the second half of the OctreeBuffer (the first half will be used for internal nodes)
-    DepthBuffer[i + particleCount - 1] = 0; // leaf nodes are at depth 0
     
     // construct the interneal node at index i (there are N-1 internal nodes)
     if (i >= particleCount - 1) return;
@@ -206,35 +201,25 @@ void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
     octreeNode.rightChild = rightChild;
     octreeNode.firstParticle = first;
     octreeNode.particleCount = nodeRange;
-    octreeNode.size = 0.0f;
-    octreeNode.centerOfMass = float4(0,0,0,0); // NOTE: look into setting the mass here (just the .w) since it should just be mass * nodeRange
+    
+    float4 CoM = float4(0, 0, 0, 0);
+    float totalMass = 0.0f;
+    float3 minBound = float3(1e10f, 1e10f, 1e10f);
+    float3 maxBound = float3(-1e10f, -1e10f, -1e10f);
+    
+    for (uint k = first; k < first + nodeRange; k++)
+    {
+        uint particleIndex = MortonBuffer[k].y; // get the original particle index from the MortonBuffer
+        float3 pos = PositionBuffer[particleIndex].xyz;
+        float3 newCoM = ((CoM.xyz * totalMass) + (pos * particleMass)) / (totalMass + particleMass);
+        totalMass += particleMass;
+        CoM = float4(newCoM, totalMass);
+        
+        minBound = min(minBound, pos);
+        maxBound = max(maxBound, pos);
+    }
+    
+    octreeNode.size = length(maxBound - minBound);;
+    octreeNode.centerOfMass = CoM;
     OctreeBuffer[i] = octreeNode;
-    DepthBuffer[i] = 1e5; // an arbitrarily large number to indicate that the depth of this node has not been calculated yet (used in the ComputeMassKernel)
-    
-}
-
-// kernel 3
-// compute the mass and centre of mass for each node in the tree
-[numthreads(256, 1, 1)]
-void ComputeMassKernel(uint3 id : SV_DispatchThreadID)
-{
-    uint i = id.x;
-    if (i >= particleCount - 1) return;
-    
-    Node internalNode = OctreeBuffer[i];
-    uint leftDepth = DepthBuffer[internalNode.leftChild];
-    uint rightDepth = DepthBuffer[internalNode.rightChild];
-    uint nodeDepth = max(leftDepth, rightDepth) + 1;
-    
-    if (nodeDepth != depthPass) return;
-    
-    DepthBuffer[i] = nodeDepth;
-    
-    Node leftNode = OctreeBuffer[internalNode.leftChild];
-    Node rightNode = OctreeBuffer[internalNode.rightChild];
-    
-    float totalMass = leftNode.centerOfMass.w + rightNode.centerOfMass.w;
-    float3 com = ((leftNode.centerOfMass.xyz * leftNode.centerOfMass.w) + (rightNode.centerOfMass.xyz * rightNode.centerOfMass.w)) / totalMass;
-    internalNode.centerOfMass = float4(com, totalMass);
-    OctreeBuffer[i] = internalNode;
 }
