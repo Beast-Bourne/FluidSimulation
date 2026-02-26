@@ -1,22 +1,24 @@
 #pragma kernel MortonKeyKernel
-#pragma kernelSortKernel
+#pragma kernel SortKernel
+#pragma kernel BuildBinaryTreeKernel
 
 struct Node
 {
-    uint firstChild;
-    uint childCount;
-    uint particleStart;
+    uint leftChild;
+    uint rightChild;
+    uint firstParticle;
     uint particleCount;
-    float3 centerOfMass;
-    float mass;
+    float size;
+    float4 centerOfMass;
 };
 
-RWStructuredBuffer<float4> PositionBuffer; // .xyz are the positions, .w is the smoothing radius (unused in this shader)
+
+StructuredBuffer<float4> PositionBuffer; // .xyz are the positions, .w is the smoothing radius (unused in this shader)
 RWStructuredBuffer<uint2> MortonBuffer; // .xyz are the morton keys, .w is the index of the particle
 RWStructuredBuffer<Node> OctreeBuffer;
 
-RWStructuredBuffer<float4> MaxBoundBuffer; // .xyz is the max bound, .w is unused
-RWStructuredBuffer<float4> MinBoundBuffer; // .xyz is the min bound, .w is unused
+StructuredBuffer<float4> MaxBoundBuffer; // .xyz is the max bound, .w is unused
+StructuredBuffer<float4> MinBoundBuffer; // .xyz is the min bound, .w is unused
 
 const uint particleCount;
 const uint groupWidth;
@@ -35,6 +37,28 @@ uint ExpandBits(uint v)
 uint Morton3D(uint x, uint y, uint z)
 {
     return ExpandBits(x) | (ExpandBits(y) << 1) | (ExpandBits(z) << 2);
+}
+
+
+// ^ is a bitewise XOR. If 'a' is 0011 and 'b' is 0101 then a ^ b returns 0110
+// therefore the first 1 tells where the first bit differs. Useful for finding the longest common prefix of two morton keys
+// The more high bits in common between 'a' and 'b', the closer they are in space
+//
+// firstbithigh returns the index of the most significant 1 bit in the input.
+// 1001 would return 3 (counts from right to left starting at 0 with a higher index being more significant)
+// 
+// since a^b gives an integer with bits that are 0 for common and 1 for different bits between 'a' and 'b':
+// this function returns the number of leading bits that are common between 'a' and 'b' (aka the 'longest common prefix')
+int LCP(int i, int j)
+{
+    if (j < 0 || j >= (int)particleCount) return -1; // out of bounds, return -1 so that it is treated as having no common prefix with 'i'
+    
+    uint a = MortonBuffer[i].x;
+    uint b = MortonBuffer[j].x;
+    
+    if (a == b) return 32 + firstbitlow(a^b); // uses firstbitlow(a^b) as part of the LCP for identicle morton keys to distinguish them
+    
+    return 31 - firstbithigh(a ^ b);
 }
 
 // kernel 0
@@ -57,7 +81,8 @@ void MortonKeyKernel(uint3 id : SV_DispatchThreadID)
     float3 normalizedPos = (pos - minBound) / domainSize; // normalize to [0, 1]
     normalizedPos = saturate(normalizedPos); // clamp to [0, 1] incase of floating point precision issues
     
-    uint3 gridCoord = (uint3) (normalizedPos * 1023.0f); // scale to [0, 1023] for 10 bits per axis
+    normalizedPos *= 1023.0f; // scale to [0, 1023] for 10 bits per axis
+    uint3 gridCoord = (uint3)normalizedPos; // scale to [0, 1023] for 10 bits per axis
     
     uint mortonKey = Morton3D(gridCoord.x, gridCoord.y, gridCoord.z);
     MortonBuffer[id.x] = uint2(mortonKey, id.x); // store the morton key and the particle's index
@@ -87,4 +112,77 @@ void SortKernel(uint3 id : SV_DispatchThreadID)
         MortonBuffer[indexLeft] = MortonBuffer[indexRight];
         MortonBuffer[indexRight] = temp;
     }
+}
+
+// kernel 2
+// build the binary radix tree
+// this is done by checking through the morton keys and comparing the longest common prefix (LCP)
+[numthreads(256,1,1)]
+void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= particleCount - 1) return;
+    int LeftLCP  = LCP(i, i - 1);
+    int RightLCP = LCP(i, i + 1);
+
+    int direction = (RightLCP > LeftLCP) ? 1 : -1;
+    int OutsideLCP = min(LeftLCP, RightLCP);
+    
+    // Find the range of particles with LCP greater than the outside LCP
+    int lmax = 2;
+    int l = 0;
+
+    while (LCP(i, i + lmax * direction) > OutsideLCP)
+    {
+        lmax <<= 1;
+    }
+    
+    for (int t = lmax >> 1; t > 0; t >>= 1)
+    {
+        if (LCP(i, i + (l + t) * direction) > OutsideLCP) l += t;
+    }
+
+    int j = i + l * direction;
+    int first = min(i, j);
+    int last  = max(i, j);
+    
+    // Find the split position. (the point closest to 'last' where the LCP with 'first' is less than or equal to the LCP of the whole range)
+    int RangeLCP = LCP(first, last);
+
+    int split = first;
+    int step  = last - first;
+
+    while (step > 1)
+    {
+        step = (step + 1) >> 1;
+        int mid = split + step;
+
+        if (mid < last)
+        {
+            int deltaSplit = LCP(first, mid);
+            if (deltaSplit > RangeLCP) split = mid;
+        }
+    }
+
+    // get the indicies of the children.
+    // internel nodes have indicies in the range 0 to N-2 and leaf nodes are N-1 to 2N-2
+    uint leftChild;
+    uint rightChild;
+
+    if (split == first) leftChild = split + particleCount - 1; // leaf index
+    else leftChild = split; // internal node (this internel node would be constructed on the thread for id.x = split)
+
+    if (split + 1 == last) rightChild = split + 1 + particleCount - 1; // leaf index
+    else rightChild = split + 1; // internal node (this internel node would be constructed on the thread for id.x = split+1)
+    
+    uint nodeRange = last - first + 1; // the particle count in this node
+
+    Node octreeNode;
+    octreeNode.leftChild = leftChild;
+    octreeNode.rightChild = rightChild;
+    octreeNode.firstParticle = first;
+    octreeNode.particleCount = nodeRange;
+    octreeNode.size = 0.0f;
+    octreeNode.centerOfMass = float4(0,0,0,0);
+    OctreeBuffer[i] = octreeNode;
 }

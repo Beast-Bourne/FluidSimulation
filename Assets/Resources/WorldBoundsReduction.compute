@@ -1,8 +1,8 @@
 #pragma kernel Reduction
 
-RWStructuredBuffer<float4> MaxInput;
+StructuredBuffer<float4> MaxInput;
 RWStructuredBuffer<float4> MaxOutput;
-RWStructuredBuffer<float4> MinInput;
+StructuredBuffer<float4> MinInput;
 RWStructuredBuffer<float4> MinOutput;
 
 const uint inputSize;

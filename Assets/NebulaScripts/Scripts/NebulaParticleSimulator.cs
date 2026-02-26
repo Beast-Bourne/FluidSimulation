@@ -25,6 +25,8 @@ public class NebulaParticleSimulator : MonoBehaviour
     ComputeBuffer globalDeltaTimeBuffer;
     ComputeBuffer OctreeBuffer;
     ComputeBuffer SpatialHashes;
+    ComputeBuffer mortonKeyBuffer;
+    ComputeBuffer newOctreeBuffer;
     ComputeBuffer debugBuffer;
 
     // spatial hash buffers and sorters
@@ -35,6 +37,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     // reduction managers
     TimestepManager timestepManager;
     GravityReductionManager gravityReductionManager;
+    OctreeScript octreeReductionManager;
 
     [Header("Simulation Settings")]
     public float CFLScale;
@@ -124,6 +127,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         SpatialOffsetsBuffer = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
         renderBuffer1 = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         renderBuffer2 = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
+        mortonKeyBuffer = ComputeHelper.CreateStructuredBuffer<uint2>(particleCount);
+        newOctreeBuffer = ComputeHelper.CreateStructuredBuffer<NewOctreeNode>((particleCount * 2)-1); // has 2N-1 nodes. 0 to N-2 are internal nodes, N-1 to 2N-2 are leaf nodes
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
@@ -152,7 +157,10 @@ public class NebulaParticleSimulator : MonoBehaviour
         gravityReductionManager = new();
         gravityReductionManager.SetBuffers(gravityForceBuffer, gravityCorrectionBuffer, particleCount);
 
-        octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, spatialStage1Size, SpatialDataBuffer, SpatialOffsetsBuffer, particleCount, particleBuffer, particleMass);
+        octreeReductionManager = new();
+        octreeReductionManager.SetBuffers(newOctreeBuffer, positionBuffer, mortonKeyBuffer, particleCount);
+
+        octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, spatialStage1Size, SpatialDataBuffer, SpatialOffsetsBuffer, particleCount, positionBuffer, particleMass);
 
         InitialiseParticleProperties();
 
@@ -221,6 +229,10 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.Dispatch(compute, particleCount, neighbourDependentPropertiesKernel);
 
         // GRAVITY AND OCTREE
+
+        Profiler.BeginSample("Octree construction");
+        octreeReductionManager.ConstructOctree();
+        Profiler.EndSample();
 
         Profiler.BeginSample("Octree update");
         octreeManager.UpdateOctree(); // update the octree mass values
@@ -417,10 +429,12 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.Release(particleBuffer, OctreeBuffer, SpatialHashes, debugBuffer, 
                               ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, 
                               entropyDataBuffer, gravityForceBuffer, gravityCorrectionBuffer,
-                              globalDeltaTimeBuffer, renderBuffer1, renderBuffer2, positionBuffer);
+                              globalDeltaTimeBuffer, renderBuffer1, renderBuffer2, positionBuffer,
+                              newOctreeBuffer, mortonKeyBuffer);
         
         timestepManager.ReleaseBuffers();
         gravityReductionManager.ReleaseBuffers();
+        octreeReductionManager.ReleaseBuffers();
     }
 }
 

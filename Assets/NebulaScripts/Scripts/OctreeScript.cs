@@ -18,10 +18,13 @@ public class OctreeScript
     ComputeBuffer minL2;
     ComputeBuffer minL3;
 
+    ComputeBuffer mortonBuffer;
+
     // kernel ID
     const int reductionKernel = 0;
     const int mortonKeyKernel = 0;
     const int sortKernel = 1;
+    const int BuildBinaryTreeKernel = 2;
 
     // parameters
     int simParticleCount;
@@ -38,10 +41,12 @@ public class OctreeScript
         simParticleCount = particleCount;
         L0 = positionBuffer;
         sortStageCount = (int)Log(NextPowerOfTwo(simParticleCount), 2);
+        mortonBuffer = mortonKeyBuffer;
 
-        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel);
+        octreeCompute.SetInt("particleCount", simParticleCount);
+        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
         ComputeHelper.SetBuffer(octreeCompute, positionBuffer, "PositionBuffer", mortonKeyKernel);
-        ComputeHelper.SetBuffer(octreeCompute, mortonKeyBuffer, "MortonBuffer", mortonKeyKernel);
+        ComputeHelper.SetBuffer(octreeCompute, mortonBuffer, "MortonBuffer", mortonKeyKernel, sortKernel, BuildBinaryTreeKernel);
 
         InitialiseBuffers();
     }
@@ -60,12 +65,12 @@ public class OctreeScript
         ComputeHelper.SetBuffer(octreeCompute, minL3, "MinBoundBuffer", mortonKeyKernel);
     }
 
-    // TODO: implement the debuglog and extract predicted pos / smoothing radius into a float4 buffer to use with this
     public void ConstructOctree()
     {
         PerformReduction();
         sortMortonKeys();
-        DebugLog();
+
+        ComputeHelper.Dispatch(octreeCompute, simParticleCount, BuildBinaryTreeKernel);
     }
 
     private void PerformReduction()
@@ -99,6 +104,8 @@ public class OctreeScript
 
     private void sortMortonKeys()
     {
+        ComputeHelper.Dispatch(octreeCompute, simParticleCount, mortonKeyKernel);
+
         for (int stageIndex = 0; stageIndex < sortStageCount; stageIndex++)
         {
             for (int stepIndex = 0; stepIndex < stageIndex + 1; stepIndex++)
@@ -115,11 +122,29 @@ public class OctreeScript
 
     private void DebugLog()
     {
-
+        uint2[] sortedKeys = new uint2[simParticleCount];
+        mortonBuffer.GetData(sortedKeys);
+        for (int i = 0; i < simParticleCount-1; i++)
+        {
+            if (sortedKeys[i].x > sortedKeys[i + 1].x)
+            {
+                Debug.Log($" keys not sorted at index {i} -> {i+1}");
+                break;
+            }
+        }
     }
 
     public void ReleaseBuffers()
     {
         ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3);
     }
+}
+
+public struct NewOctreeNode
+{
+    uint firstChild;
+    uint childCount;
+    uint particleStart;
+    uint particleCount;
+    float4 centerOfMass;
 }
