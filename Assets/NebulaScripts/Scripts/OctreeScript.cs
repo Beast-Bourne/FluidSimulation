@@ -19,15 +19,18 @@ public class OctreeScript
     ComputeBuffer minL3;
 
     ComputeBuffer mortonBuffer;
+    ComputeBuffer binaryTreeBuffer;
 
     // kernel ID
     const int reductionKernel = 0;
     const int mortonKeyKernel = 0;
     const int sortKernel = 1;
     const int BuildBinaryTreeKernel = 2;
+    const int ComputeMassKernel = 3;
 
     // parameters
     int simParticleCount;
+    int nodeCount;
     int sortStageCount;
 
     public OctreeScript()
@@ -36,16 +39,20 @@ public class OctreeScript
         octreeCompute = ComputeHelper.LoadComputeShader("OctreeConstructor");
     }
 
-    public void SetBuffers(ComputeBuffer octreeBuffer, ComputeBuffer positionBuffer, ComputeBuffer mortonKeyBuffer, int particleCount)
+    public void SetBuffers(ComputeBuffer octreeBuffer, ComputeBuffer positionBuffer, ComputeBuffer mortonKeyBuffer, int particleCount, float mass)
     {
         simParticleCount = particleCount;
+        nodeCount = (simParticleCount * 2) - 1;
         L0 = positionBuffer;
         sortStageCount = (int)Log(NextPowerOfTwo(simParticleCount), 2);
         mortonBuffer = mortonKeyBuffer;
+        binaryTreeBuffer = octreeBuffer;
 
         octreeCompute.SetInt("particleCount", simParticleCount);
-        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
-        ComputeHelper.SetBuffer(octreeCompute, positionBuffer, "PositionBuffer", mortonKeyKernel);
+        octreeCompute.SetInt("nodeCount", nodeCount);
+        octreeCompute.SetFloat("particleMass", mass);
+        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel, ComputeMassKernel);
+        ComputeHelper.SetBuffer(octreeCompute, positionBuffer, "PositionBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
         ComputeHelper.SetBuffer(octreeCompute, mortonBuffer, "MortonBuffer", mortonKeyKernel, sortKernel, BuildBinaryTreeKernel);
 
         InitialiseBuffers();
@@ -71,6 +78,8 @@ public class OctreeScript
         sortMortonKeys();
 
         ComputeHelper.Dispatch(octreeCompute, simParticleCount, BuildBinaryTreeKernel);
+        ComputeHelper.Dispatch(octreeCompute, nodeCount, ComputeMassKernel);
+        DebugLog();
     }
 
     private void PerformReduction()
@@ -122,16 +131,11 @@ public class OctreeScript
 
     private void DebugLog()
     {
-        uint2[] sortedKeys = new uint2[simParticleCount];
-        mortonBuffer.GetData(sortedKeys);
-        for (int i = 0; i < simParticleCount-1; i++)
-        {
-            if (sortedKeys[i].x > sortedKeys[i + 1].x)
-            {
-                Debug.Log($" keys not sorted at index {i} -> {i+1}");
-                break;
-            }
-        }
+        int totalNodes = (simParticleCount * 2) - 1;
+        NewOctreeNode[] sortedKeys = new NewOctreeNode[totalNodes];
+        binaryTreeBuffer.GetData(sortedKeys);
+
+        Debug.Log($"root node mass: {sortedKeys[64000-200].centerOfMass.w}");
     }
 
     public void ReleaseBuffers()
@@ -142,9 +146,10 @@ public class OctreeScript
 
 public struct NewOctreeNode
 {
-    uint firstChild;
-    uint childCount;
-    uint particleStart;
-    uint particleCount;
-    float4 centerOfMass;
+    public uint leftChild;
+    public uint rightChild;
+    public uint firstParticle;
+    public uint particleCount;
+    public float size;
+    public float4 centerOfMass;
 }

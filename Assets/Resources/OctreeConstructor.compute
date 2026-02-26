@@ -1,6 +1,7 @@
 #pragma kernel MortonKeyKernel
 #pragma kernel SortKernel
 #pragma kernel BuildBinaryTreeKernel
+#pragma kernel ComputeMassKernel
 
 struct Node
 {
@@ -21,6 +22,9 @@ StructuredBuffer<float4> MaxBoundBuffer; // .xyz is the max bound, .w is unused
 StructuredBuffer<float4> MinBoundBuffer; // .xyz is the min bound, .w is unused
 
 const uint particleCount;
+const uint nodeCount;
+const float particleMass;
+
 const uint groupWidth;
 const uint groupHeight;
 const uint stepIndex;
@@ -121,6 +125,21 @@ void SortKernel(uint3 id : SV_DispatchThreadID)
 void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
 {
     uint i = id.x;
+    if (i >= particleCount) return;
+    
+    // construct the leaf node for particle i (there are N particles)
+    uint particleIndex = MortonBuffer[i].y; // get the original particle index from the MortonBuffer
+    
+    Node leafNode;
+    leafNode.leftChild = -1;
+    leafNode.rightChild = -1;
+    leafNode.firstParticle = i; // the index of the particle corresponding to this leaf node (index is for the morton buffer, not the particle buffer)
+    leafNode.particleCount = 1; // leaf nodes represent a single particle
+    leafNode.size = 0.0f; // size is not used for leaf nodes
+    leafNode.centerOfMass = float4(PositionBuffer[particleIndex].xyz, particleMass);
+    OctreeBuffer[i + particleCount - 1] = leafNode; // store the leaf node in the second half of the OctreeBuffer (the first half will be used for internal nodes)
+    
+    // construct the interneal node at index i (there are N-1 internal nodes)
     if (i >= particleCount - 1) return;
     int LeftLCP  = LCP(i, i - 1);
     int RightLCP = LCP(i, i + 1);
@@ -185,4 +204,28 @@ void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
     octreeNode.size = 0.0f;
     octreeNode.centerOfMass = float4(0,0,0,0);
     OctreeBuffer[i] = octreeNode;
+}
+
+// kernel 3
+// compute the mass and centre of mass for each node in the tree
+[numthreads(256, 1, 1)]
+void ComputeMassKernel(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= particleCount-1) return;
+    
+    uint nodeIndex = (particleCount - 2) - i;
+    
+    Node node = OctreeBuffer[nodeIndex];
+    Node leftChild = OctreeBuffer[node.leftChild];
+    Node rightChild = OctreeBuffer[node.rightChild];
+    
+    float leftMass = leftChild.centerOfMass.w;
+    float rightMass = rightChild.centerOfMass.w;
+    float totalMass = leftMass + rightMass;
+    
+    float3 CoM = (leftChild.centerOfMass.xyz * leftMass + rightChild.centerOfMass.xyz * rightMass) / totalMass;
+    node.centerOfMass = float4(CoM, totalMass);
+    
+    OctreeBuffer[nodeIndex] = node;
 }

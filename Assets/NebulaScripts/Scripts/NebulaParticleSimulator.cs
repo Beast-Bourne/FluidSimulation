@@ -158,7 +158,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         gravityReductionManager.SetBuffers(gravityForceBuffer, gravityCorrectionBuffer, particleCount);
 
         octreeReductionManager = new();
-        octreeReductionManager.SetBuffers(newOctreeBuffer, positionBuffer, mortonKeyBuffer, particleCount);
+        octreeReductionManager.SetBuffers(newOctreeBuffer, positionBuffer, mortonKeyBuffer, particleCount, particleMass);
 
         octreeManager.SetBuffers(OctreeBuffer, SpatialHashes, spatialStage1Size, SpatialDataBuffer, SpatialOffsetsBuffer, particleCount, positionBuffer, particleMass);
 

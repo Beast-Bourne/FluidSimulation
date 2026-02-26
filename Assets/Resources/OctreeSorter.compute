@@ -61,7 +61,7 @@ static const int3 OctreeOffsets[8] =
 	int3(1, 1, 1)
 };
 
-// kernel 1
+// kernel 0
 // Sets spatial data for the bottom layer of the octree
 [numthreads(128,1,1)]
 void SetSpatialData (uint3 id : SV_DispatchThreadID)
@@ -96,7 +96,7 @@ void SetSpatialData (uint3 id : SV_DispatchThreadID)
     }
 }
 
-// kernel 2
+// kernel 1
 // updates the masses of the octree layer
 [numthreads(128, 1, 1)]
 void UpdateMasses(uint3 id : SV_DispatchThreadID)
