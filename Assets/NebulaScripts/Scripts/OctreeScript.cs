@@ -1,6 +1,7 @@
 using UnityEngine;
 using Unity.Mathematics;
 using static UnityEngine.Mathf;
+using System.Collections.Generic;
 
 // NOTE: can not simulate more than 256^3 (~16.7M) particles due to reduction buffer size limits in this class
 public class OctreeScript
@@ -20,6 +21,7 @@ public class OctreeScript
 
     ComputeBuffer mortonBuffer;
     ComputeBuffer binaryTreeBuffer;
+    ComputeBuffer depthBuffer;
 
     // kernel ID
     const int reductionKernel = 0;
@@ -68,8 +70,11 @@ public class OctreeScript
         minL2 = ComputeHelper.CreateStructuredBuffer<float4>(256);
         minL3 = ComputeHelper.CreateStructuredBuffer<float4>(1);
 
+        depthBuffer = ComputeHelper.CreateStructuredBuffer<uint>(nodeCount);
+
         ComputeHelper.SetBuffer(octreeCompute, maxL3, "MaxBoundBuffer", mortonKeyKernel);
         ComputeHelper.SetBuffer(octreeCompute, minL3, "MinBoundBuffer", mortonKeyKernel);
+        ComputeHelper.SetBuffer(octreeCompute, depthBuffer, "DepthBuffer", BuildBinaryTreeKernel, ComputeMassKernel);
     }
 
     public void ConstructOctree()
@@ -78,8 +83,7 @@ public class OctreeScript
         sortMortonKeys();
 
         ComputeHelper.Dispatch(octreeCompute, simParticleCount, BuildBinaryTreeKernel);
-        ComputeHelper.Dispatch(octreeCompute, nodeCount, ComputeMassKernel);
-        DebugLog();
+        ComputeMasses();
     }
 
     private void PerformReduction()
@@ -129,18 +133,28 @@ public class OctreeScript
         }
     }
 
+    // NOTE: this is terrible, make it better
+    public void ComputeMasses()
+    {
+        for (int i = 1; i < 31; i++)
+        {
+            octreeCompute.SetInt("depthPass", i);
+            ComputeHelper.Dispatch(octreeCompute, simParticleCount-1, ComputeMassKernel);
+        }
+    }
+
     private void DebugLog()
     {
         int totalNodes = (simParticleCount * 2) - 1;
         NewOctreeNode[] sortedKeys = new NewOctreeNode[totalNodes];
         binaryTreeBuffer.GetData(sortedKeys);
 
-        Debug.Log($"root node mass: {sortedKeys[64000-200].centerOfMass.w}");
+        Debug.Log($"root node mass: {sortedKeys[0].centerOfMass.w}");
     }
 
     public void ReleaseBuffers()
     {
-        ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3);
+        ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3, depthBuffer);
     }
 }
 
