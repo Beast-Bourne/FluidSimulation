@@ -724,7 +724,14 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     vel += (ResultantForces[id.x] + GravityCorrectionBuffer[0]) * dt;
     pos += vel * dt;
     
-    pos = clamp(pos, -boundsSize, boundsSize);
+    float3 minBound = -boundsSize;
+    float3 maxBound = boundsSize;
+    
+    // detect boundary violations
+    float3 hitMin = step(pos, minBound); // returns a float3. each componenet is 1 if the pos component is less than the minimum bound, and 0 otherwise
+    float3 hitMax = step(maxBound, pos); // does the same but for the pos component being greater than the maximum bound
+    pos = clamp(pos, minBound, maxBound); // clamp the position to be within the bounds
+    vel *= 1 - 2 * (hitMin + hitMax); // either reflects or does nothing to the velocity depening on of the particle hit the bounds in each axis
     
     particle.position = pos;
     particle.velocity = vel;
