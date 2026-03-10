@@ -1,6 +1,10 @@
+#pragma target 6.0
 #pragma kernel MortonKeyKernel
 #pragma kernel SortKernel
 #pragma kernel BuildBinaryTreeKernel
+#pragma kernel AtomicBounds
+#pragma kernel CalculatePropertiesKernel
+#pragma kernel CalculateBoundsKernel
 
 struct Node
 {
@@ -14,10 +18,37 @@ struct Node
     float4 centerOfMass;
 };
 
+struct NodeProperties
+{
+    float3 minBound;
+    float3 maxBound;
+    uint depth;
+};
+
+struct AtomicProperties
+{
+    uint minX;
+    uint minY;
+    uint minZ;
+    
+    uint maxX;
+    uint maxY;
+    uint maxZ;
+    
+    float comX;
+    float comY;
+    float comZ;
+};
+
 
 StructuredBuffer<float4> PositionBuffer; // .xyz are the positions, .w is the smoothing radius (unused in this shader)
 RWStructuredBuffer<uint2> MortonBuffer; // .xyz are the morton keys, .w is the index of the particle
 RWStructuredBuffer<Node> OctreeBuffer;
+
+RWStructuredBuffer<NodeProperties> NodePropertiesBuffer;
+RWStructuredBuffer<AtomicProperties> AtomicPropertiesBuffer;
+
+RWStructuredBuffer<uint> ParentBuffer;
 
 StructuredBuffer<float4> MaxBoundBuffer; // .xyz is the max bound, .w is unused
 StructuredBuffer<float4> MinBoundBuffer; // .xyz is the min bound, .w is unused
@@ -29,6 +60,8 @@ const float particleMass;
 const uint groupWidth;
 const uint groupHeight;
 const uint stepIndex;
+
+const uint depthPass;
 
 uint ExpandBits(uint v)
 {
@@ -60,9 +93,55 @@ int LCP(int i, int j)
     uint a = MortonBuffer[i].x;
     uint b = MortonBuffer[j].x;
     
-    if (a == b) return 32 + firstbitlow(a^b); // uses firstbitlow(a^b) as part of the LCP for identicle morton keys to distinguish them
+    if (a == b) return 32 + firstbitlow(i^j); // uses firstbitlow(a^b) as part of the LCP for identicle morton keys to distinguish them
     
     return 31 - firstbithigh(a ^ b);
+}
+
+// & is a bitwise AND. If 'a' is 0011 and 'b' is 0101 then a & b returns 0001
+// ~ is a bitwise NOT. If 'a' is 0011 then ~a is 1100
+// | is a bitwise OR. If 'a' is 0011 and 'b' is 0101 then a | b returns 0111
+// floats most significant bit is the sign bit. negatives have a 1 and positives have a 0
+// just using asuint to convert it would cause negative floats to have a large uint value than the positive floats
+// 0x80000000 bitwise is is 1000...000 in binary (only has the front most bit as a 1)
+// thus u & 0x80000000 returns true for a negative float and false for a positive float
+// ~u then changes the sign bit to a 0
+// u | 0x80000000 changes a postive floats sign bit to a 1
+// this ensures positive floats uint value is larger than the negative ones
+uint FloatToOrderedUint(float f)
+{
+    uint u = asuint(f);
+    return (u & 0x80000000) ? ~u : (u | 0x80000000);
+}
+
+// this performs the inverse operation of FloatToOrderedUint. It converts the ordered uint back to a float, maintaining is sign
+float OrderedUintToFloat(uint u)
+{
+    uint f = (u & 0x80000000) ? (u & ~0x80000000) : ~u;
+    return asfloat(f);
+}
+
+void PropagateUp(uint nodeIndex, uint leafPosX, uint leafPosY, uint leafPosZ)
+{
+    while (nodeIndex != 0)
+    {
+        uint parentIndex = ParentBuffer[nodeIndex];
+        //float oldValX;
+        //float oldValY;
+        //float oldValZ;
+        
+        //InterlockedAdd(AtomicPropertiesBuffer[parentIndex].comX, OrderedUintToFloat(leafPosX), oldValX);
+        //InterlockedAdd(AtomicPropertiesBuffer[parentIndex].comY, OrderedUintToFloat(leafPosY), oldValY);
+        //InterlockedAdd(AtomicPropertiesBuffer[parentIndex].comZ, OrderedUintToFloat(leafPosZ), oldValZ);
+        
+        InterlockedMin(AtomicPropertiesBuffer[parentIndex].minX, leafPosX);
+        InterlockedMin(AtomicPropertiesBuffer[parentIndex].minY, leafPosY);
+        InterlockedMin(AtomicPropertiesBuffer[parentIndex].minZ, leafPosZ);
+        
+        InterlockedMax(AtomicPropertiesBuffer[parentIndex].maxX, leafPosX);
+        InterlockedMax(AtomicPropertiesBuffer[parentIndex].maxY, leafPosY);
+        InterlockedMax(AtomicPropertiesBuffer[parentIndex].maxZ, leafPosZ);
+    }
 }
 
 // kernel 0
@@ -70,7 +149,7 @@ int LCP(int i, int j)
 [numthreads(256,1,1)]
 void MortonKeyKernel(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x > particleCount) return;
+    if (id.x >= particleCount) return;
     
     float3 pos = PositionBuffer[id.x].xyz;
     
@@ -139,7 +218,29 @@ void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
     leafNode.centerOfMass = float4(PositionBuffer[particleIndex].xyz, particleMass);
     OctreeBuffer[i + particleCount - 1] = leafNode; // store the leaf node in the second half of the OctreeBuffer (the first half will be used for internal nodes)
     
-    // construct the interneal node at index i (there are N-1 internal nodes)
+    // properties buffer for kernel 4. NOTE: this is what needs replacing
+    float3 pos = PositionBuffer[particleIndex].xyz;
+    NodeProperties leafProp;
+    leafProp.maxBound = pos;
+    leafProp.minBound = pos;
+    leafProp.depth = 0;
+    NodePropertiesBuffer[i + particleCount - 1] = leafProp;
+    
+    // atomic properties buffer for kernel 3. NOTE: currently just used for bounds, need to add CoM
+    AtomicProperties nodeProps;
+    nodeProps.minX = FloatToOrderedUint(pos.x);
+    nodeProps.minY = FloatToOrderedUint(pos.y);
+    nodeProps.minZ = FloatToOrderedUint(pos.z);
+    nodeProps.maxX = FloatToOrderedUint(pos.x);
+    nodeProps.maxY = FloatToOrderedUint(pos.y);
+    nodeProps.maxZ = FloatToOrderedUint(pos.z);
+    nodeProps.comX = 0;
+    nodeProps.comY = 0;
+    nodeProps.comZ = 0;
+    AtomicPropertiesBuffer[i + particleCount - 1] = nodeProps;
+    
+    
+    // construct the internal node at index i (there are N-1 internal nodes)
     if (i >= particleCount - 1) return;
     int LeftLCP  = LCP(i, i - 1);
     int RightLCP = LCP(i, i + 1);
@@ -201,25 +302,110 @@ void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
     octreeNode.rightChild = rightChild;
     octreeNode.firstParticle = first;
     octreeNode.particleCount = nodeRange;
-    
-    float4 CoM = float4(0, 0, 0, 0);
-    float totalMass = 0.0f;
-    float3 minBound = float3(1e10f, 1e10f, 1e10f);
-    float3 maxBound = float3(-1e10f, -1e10f, -1e10f);
-    
-    for (uint k = first; k < first + nodeRange; k++)
-    {
-        uint particleIndex = MortonBuffer[k].y; // get the original particle index from the MortonBuffer
-        float3 pos = PositionBuffer[particleIndex].xyz;
-        float3 newCoM = ((CoM.xyz * totalMass) + (pos * particleMass)) / (totalMass + particleMass);
-        totalMass += particleMass;
-        CoM = float4(newCoM, totalMass);
-        
-        minBound = min(minBound, pos);
-        maxBound = max(maxBound, pos);
-    }
-    
-    octreeNode.size = length(maxBound - minBound);;
-    octreeNode.centerOfMass = CoM;
+    octreeNode.centerOfMass = float4(0, 0, 0, 0);
+    octreeNode.size = 0.0f;
     OctreeBuffer[i] = octreeNode;
+    
+    // node properties for kernel 4. NOTE: this is what needs replacing
+    NodeProperties nodeProp;
+    nodeProp.depth = 1e5;
+    nodeProp.maxBound = float3(-1e10, -1e10, -1e10);
+    nodeProp.minBound = float3(1e10, 1e10, 1e10);
+    NodePropertiesBuffer[i] = nodeProp;
+    
+    // atomic properties for kernel 3. NOTE: currently just used for bounds, need to add CoM
+    AtomicProperties nodePropers;
+    nodePropers.maxX = FloatToOrderedUint(-1e10);
+    nodePropers.maxY = FloatToOrderedUint(-1e10);
+    nodePropers.maxZ = FloatToOrderedUint(-1e10);
+    nodePropers.minX = FloatToOrderedUint(1e10);
+    nodePropers.minY = FloatToOrderedUint(1e10);
+    nodePropers.minZ = FloatToOrderedUint(1e10);
+    nodePropers.comX = 0;
+    nodePropers.comY = 0;
+    nodePropers.comZ = 0;
+    AtomicPropertiesBuffer[i] = nodePropers;
+    
+    
+    ParentBuffer[leftChild] = i;
+    ParentBuffer[rightChild] = i;
+}
+
+// kernel 3
+// performs the atomic min/max to find the upper and lower bounds of each node
+[numthreads(256, 1, 1)]
+void AtomicBounds(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= nodeCount) return;
+    
+    
+    if (id.x >= particleCount - 1)
+    {
+        AtomicProperties leafProps = AtomicPropertiesBuffer[id.x];
+        PropagateUp(id.x, leafProps.minX, leafProps.minY, leafProps.minZ);
+    }
+}
+
+// kernel 4
+// finds the CoM of each node
+// TODO: This needs replacing with something better
+[numthreads(256, 1, 1)]
+void CalculatePropertiesKernel(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= nodeCount) return;
+    
+    uint i = id.x;
+    if (i >= particleCount-1) return;
+
+    Node treeNode = OctreeBuffer[i];
+    uint leftDepth = NodePropertiesBuffer[treeNode.leftChild].depth;
+    uint rightDepth = NodePropertiesBuffer[treeNode.rightChild].depth;
+    uint depth = max(leftDepth, rightDepth) + 1;
+    if (depth != depthPass) return; // only process nodes at the current depth pass to ensure child nodes are processed before parent nodes)
+    
+    NodeProperties leftProps = NodePropertiesBuffer[treeNode.leftChild];
+    NodeProperties rightProps = NodePropertiesBuffer[treeNode.rightChild];
+    
+    float3 upperBound = max(leftProps.maxBound, rightProps.maxBound);
+    float3 lowerBound = min(leftProps.minBound, rightProps.minBound);
+    float size = length(upperBound - lowerBound);
+    
+    float4 leftCoM = OctreeBuffer[treeNode.leftChild].centerOfMass;
+    float4 rightCoM = OctreeBuffer[treeNode.rightChild].centerOfMass;
+    float totalMass = leftCoM.w + rightCoM.w;
+    float3 CoM = ((leftCoM.xyz * leftCoM.w) + (rightCoM.xyz*rightCoM.w)) / totalMass;
+    float4 nodeCoM = float4(CoM, leftCoM.w + rightCoM.w);
+    
+    if (totalMass == 0) nodeCoM = float4(0, 0, 0, 0);
+    
+    NodeProperties nodeProps;
+    nodeProps.maxBound = upperBound;
+    nodeProps.minBound = lowerBound;
+    nodeProps.depth = depth;
+    
+    NodePropertiesBuffer[i] = nodeProps;
+    OctreeBuffer[i].centerOfMass = nodeCoM;
+    OctreeBuffer[i].size = size;
+    
+}
+
+// kernel 5
+[numthreads(256, 1, 1)]
+void CalculateBoundsKernel(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= particleCount-1) return;
+    
+    Node internalNode = OctreeBuffer[id.x];
+    
+    AtomicProperties nodeProps = AtomicPropertiesBuffer[id.x];
+    float3 lowerBound = float3(OrderedUintToFloat(nodeProps.minX), OrderedUintToFloat(nodeProps.minY), OrderedUintToFloat(nodeProps.minZ));
+    float3 upperBound = float3(OrderedUintToFloat(nodeProps.maxX), OrderedUintToFloat(nodeProps.maxY), OrderedUintToFloat(nodeProps.maxZ));
+    float size = length(upperBound - lowerBound);
+    
+    //float3 centerOfMass = float3(nodeProps.comX, nodeProps.comY, nodeProps.comZ) / internalNode.particleCount;
+    
+    //internalNode.centerOfMass = float4(centerOfMass, internalNode.particleCount * particleMass);
+    internalNode.size = size;
+    
+    OctreeBuffer[id.x] = internalNode;
 }

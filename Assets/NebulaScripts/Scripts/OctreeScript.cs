@@ -22,11 +22,18 @@ public class OctreeScript
     ComputeBuffer mortonBuffer;
     ComputeBuffer binaryTreeBuffer;
 
+    ComputeBuffer propsBuffer;
+    ComputeBuffer parentBuffer;
+    ComputeBuffer atomicBuffer;
+
     // kernel ID
     const int reductionKernel = 0;
     const int mortonKeyKernel = 0;
     const int sortKernel = 1;
     const int BuildBinaryTreeKernel = 2;
+    const int atomicBoundsKernel = 3;
+    const int CalculatePropertiesKernel = 4;
+    const int CalcBoundsKernel = 5;
 
     // parameters
     int simParticleCount;
@@ -51,7 +58,7 @@ public class OctreeScript
         octreeCompute.SetInt("particleCount", simParticleCount);
         octreeCompute.SetInt("nodeCount", nodeCount);
         octreeCompute.SetFloat("particleMass", mass);
-        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
+        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel, CalculatePropertiesKernel, CalcBoundsKernel);
         ComputeHelper.SetBuffer(octreeCompute, positionBuffer, "PositionBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
         ComputeHelper.SetBuffer(octreeCompute, mortonBuffer, "MortonBuffer", mortonKeyKernel, sortKernel, BuildBinaryTreeKernel);
 
@@ -68,6 +75,16 @@ public class OctreeScript
         minL2 = ComputeHelper.CreateStructuredBuffer<float4>(256);
         minL3 = ComputeHelper.CreateStructuredBuffer<float4>(1);
 
+        propsBuffer = ComputeHelper.CreateStructuredBuffer<NodeProps>(nodeCount);
+        parentBuffer = ComputeHelper.CreateStructuredBuffer<uint>(nodeCount);
+        atomicBuffer = ComputeHelper.CreateStructuredBuffer<AtomicProperties>(nodeCount);
+
+        ComputeHelper.SetBuffer(octreeCompute, atomicBuffer, "AtomicPropertiesBuffer", CalculatePropertiesKernel, BuildBinaryTreeKernel, CalcBoundsKernel, atomicBoundsKernel);
+
+        ComputeHelper.SetBuffer(octreeCompute, parentBuffer, "ParentBuffer", BuildBinaryTreeKernel, CalculatePropertiesKernel, atomicBoundsKernel);
+
+        ComputeHelper.SetBuffer(octreeCompute, propsBuffer, "NodePropertiesBuffer", CalculatePropertiesKernel, BuildBinaryTreeKernel);
+
         ComputeHelper.SetBuffer(octreeCompute, maxL3, "MaxBoundBuffer", mortonKeyKernel);
         ComputeHelper.SetBuffer(octreeCompute, minL3, "MinBoundBuffer", mortonKeyKernel);
     }
@@ -78,6 +95,9 @@ public class OctreeScript
         sortMortonKeys();
 
         ComputeHelper.Dispatch(octreeCompute, simParticleCount, BuildBinaryTreeKernel);
+        //ComputeHelper.Dispatch(octreeCompute, nodeCount, CalculatePropertiesKernel);
+        CalcProps();
+        //DebugLog();
     }
 
     private void PerformReduction()
@@ -127,18 +147,32 @@ public class OctreeScript
         }
     }
 
+    private void CalcProps()
+    {
+        for (int i = 1; i < 31; i++)
+        {
+            octreeCompute.SetInt("depthPass", i);
+            ComputeHelper.Dispatch(octreeCompute, simParticleCount-1, CalculatePropertiesKernel);
+        }
+    }
+
     private void DebugLog()
     {
-        int totalNodes = (simParticleCount * 2) - 1;
-        NewOctreeNode[] sortedKeys = new NewOctreeNode[totalNodes];
+        NodeProps[] props = new NodeProps[nodeCount];
+        propsBuffer.GetData(props);
+        if (props[0].depth >= 70) Debug.Log($"root node at depth: {props[0].depth}");
+
+        /*
+        NewOctreeNode[] sortedKeys = new NewOctreeNode[nodeCount];
         binaryTreeBuffer.GetData(sortedKeys);
 
-        Debug.Log($"root node mass: {sortedKeys[0].centerOfMass.w}");
+        Debug.Log($"root node mass: {sortedKeys[64000-1].centerOfMass.w}");
+        */
     }
 
     public void ReleaseBuffers()
     {
-        ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3);
+        ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3, propsBuffer, parentBuffer, atomicBuffer);
     }
 }
 
@@ -150,4 +184,26 @@ public struct NewOctreeNode
     public uint particleCount;
     public float size;
     public float4 centerOfMass;
+}
+
+public struct NodeProps
+{
+    public float3 minBound;
+    public float3 maxBound;
+    public uint depth;
+}
+
+public struct AtomicProperties
+{
+    uint minX;
+    uint minY;
+    uint minZ;
+
+    uint maxX;
+    uint maxY;
+    uint maxZ;
+
+    float comX;
+    float comY;
+    float comZ;
 }
