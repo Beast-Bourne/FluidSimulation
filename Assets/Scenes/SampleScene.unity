@@ -13873,9 +13873,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
-  spawnSize: 60
-  VelocitySigma: 1.5
-  randomOffsetStrength: 0.5
+  spawnSize: 120
+  VelocitySigma: 0
+  randomOffsetStrength: 1
 --- !u!1 &1374176186
 GameObject:
   m_ObjectHideFlags: 0
@@ -13996,6 +13996,7 @@ MonoBehaviour:
   pressureMultiplier: 0.9
   adiabaticIndex: 1.4
   isPaused: 0
+  boundSize: 70
   minFactor: 1
   spatialStage1Size: 0.75
   spatialStage2Size: 1
@@ -14150,7 +14151,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   shader: {fileID: 4800000, guid: 1ce7870ade767a446912c7594f9def5f, type: 3}
   mesh: {fileID: 10210, guid: 0000000000000000e000000000000000, type: 0}
-  scale: 0.05
+  scale: 0.15
   colourMap:
     serializedVersion: 2
     key0: {r: 0.13363299, g: 0.34235913, b: 0.7264151, a: 1}

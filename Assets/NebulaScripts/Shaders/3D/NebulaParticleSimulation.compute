@@ -122,6 +122,7 @@ const float minSizeFactor;
 const uint numParticles;
 const float CFL;
 const float damping;
+const float boundsSize;
 
 // gravity constants
 const float gravity;
@@ -738,6 +739,8 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     
     vel += (ResultantForces[id.x] + GravityCorrectionBuffer[0]) * dt;
     pos += vel * dt;
+    
+    pos = clamp(pos, -boundsSize, boundsSize);
     
     particle.position = pos;
     particle.velocity = vel;

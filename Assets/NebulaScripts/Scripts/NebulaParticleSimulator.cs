@@ -42,6 +42,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float pressureMultiplier;
     public float adiabaticIndex;
     public bool isPaused;
+    public float boundSize;
 
     [Header("Smoothing Radius Settings")]
     public float minFactor;
@@ -281,6 +282,8 @@ public class NebulaParticleSimulator : MonoBehaviour
 
         compute.SetFloat("sigma", 1 / Mathf.PI);
         compute.SetFloat("C2Const", 21.0f/ (16.0f * Mathf.PI));
+
+        compute.SetFloat("boundsSize", boundSize);
     }
 
     // Sets the initial buffer data for the simulation
@@ -301,7 +304,7 @@ public class NebulaParticleSimulator : MonoBehaviour
             ParticleData particle = new ParticleData
             {
                 position = spawnData.positions[i],
-                velocity = new float3(0.0f, 0.0f, 0.0f),// spawnData.velocities[i],
+                velocity = spawnData.velocities[i],
                 entropy = 0.0f,
                 density = 0.0f,
                 pressureCorrection = 0.0f,
@@ -419,6 +422,12 @@ public class NebulaParticleSimulator : MonoBehaviour
         timestepManager.ReleaseBuffers();
         gravityReductionManager.ReleaseBuffers();
         octreeReductionManager.ReleaseBuffers();
+    }
+
+    private void OnDrawGizmos()
+    {
+        Gizmos.color = Color.white;
+        Gizmos.DrawWireCube(Vector3.zero, Vector3.one * boundSize * 2);
     }
 }
 

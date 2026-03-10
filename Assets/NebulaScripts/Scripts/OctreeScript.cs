@@ -95,9 +95,11 @@ public class OctreeScript
         sortMortonKeys();
 
         ComputeHelper.Dispatch(octreeCompute, simParticleCount, BuildBinaryTreeKernel);
-        //ComputeHelper.Dispatch(octreeCompute, nodeCount, CalculatePropertiesKernel);
+
+        //ComputeHelper.Dispatch(octreeCompute, nodeCount, atomicBoundsKernel);
+        //ComputeHelper.Dispatch(octreeCompute, nodeCount, CalcBoundsKernel);
+
         CalcProps();
-        //DebugLog();
     }
 
     private void PerformReduction()

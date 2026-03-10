@@ -75,8 +75,8 @@ Shader "Hidden/Particle3D"
 
                 float3 centreWorld = particles[instanceID].xyz;
 
-                float3 camRight = UNITY_MATRIX_I_V._m00_m01_m02;
-                float3 camUp = UNITY_MATRIX_I_V._m10_m11_m12;
+                float3 camRight = UNITY_MATRIX_I_V._m00_m10_m20;
+                float3 camUp = UNITY_MATRIX_I_V._m01_m11_m21;
                 float3 worldOffset = (camRight * v.vertex.x + camUp * v.vertex.y) * scale;
                 float3 worldVertPoss = centreWorld + worldOffset;
                 float4 clipPos = mul(UNITY_MATRIX_VP, float4(worldVertPoss, 1));

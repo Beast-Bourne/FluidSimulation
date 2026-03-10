@@ -141,6 +141,8 @@ void PropagateUp(uint nodeIndex, uint leafPosX, uint leafPosY, uint leafPosZ)
         InterlockedMax(AtomicPropertiesBuffer[parentIndex].maxX, leafPosX);
         InterlockedMax(AtomicPropertiesBuffer[parentIndex].maxY, leafPosY);
         InterlockedMax(AtomicPropertiesBuffer[parentIndex].maxZ, leafPosZ);
+        
+        nodeIndex = parentIndex;
     }
 }
 
@@ -373,10 +375,10 @@ void CalculatePropertiesKernel(uint3 id : SV_DispatchThreadID)
     float4 leftCoM = OctreeBuffer[treeNode.leftChild].centerOfMass;
     float4 rightCoM = OctreeBuffer[treeNode.rightChild].centerOfMass;
     float totalMass = leftCoM.w + rightCoM.w;
-    float3 CoM = ((leftCoM.xyz * leftCoM.w) + (rightCoM.xyz*rightCoM.w)) / totalMass;
-    float4 nodeCoM = float4(CoM, leftCoM.w + rightCoM.w);
+    float3 CoM = ((leftCoM.xyz * leftCoM.w) + (rightCoM.xyz * rightCoM.w)) / max(totalMass, 1);
+    float4 nodeCoM = float4(CoM, max(totalMass, 1));
     
-    if (totalMass == 0) nodeCoM = float4(0, 0, 0, 0);
+    //if (totalMass == 0) nodeCoM = float4(0, 0, 0, 1);
     
     NodeProperties nodeProps;
     nodeProps.maxBound = upperBound;
