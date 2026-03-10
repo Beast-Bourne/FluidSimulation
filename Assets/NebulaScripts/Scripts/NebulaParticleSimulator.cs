@@ -23,7 +23,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     ComputeBuffer deltaTimeBuffer;
     ComputeBuffer globalDeltaTimeBuffer;
     ComputeBuffer mortonKeyBuffer;
-    ComputeBuffer newOctreeBuffer;
+    ComputeBuffer binaryTreeBuffer;
     ComputeBuffer debugBuffer;
 
     // spatial hash buffers and sorters
@@ -34,7 +34,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     // reduction managers
     TimestepManager timestepManager;
     GravityReductionManager gravityReductionManager;
-    OctreeScript octreeReductionManager;
+    BinaryTreeManager BinaryTreeManager;
 
     [Header("Simulation Settings")]
     public float CFLScale;
@@ -124,7 +124,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         renderBuffer1 = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         renderBuffer2 = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         mortonKeyBuffer = ComputeHelper.CreateStructuredBuffer<uint2>(particleCount);
-        newOctreeBuffer = ComputeHelper.CreateStructuredBuffer<NewOctreeNode>((particleCount * 2)-1); // has 2N-1 nodes. 0 to N-2 are internal nodes, N-1 to 2N-2 are leaf nodes
+        binaryTreeBuffer = ComputeHelper.CreateStructuredBuffer<BinaryTreeNode>((particleCount * 2)-1); // has 2N-1 nodes. 0 to N-2 are internal nodes, N-1 to 2N-2 are leaf nodes
         SetInitialBufferData(spawnData);
 
         // tell the computer shader which kernels have access to which buffers
@@ -139,7 +139,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, ResultantForceBuffer, "ResultantForces", updatePositionKernel, gravityKernel, UpdatePredictionsKernel, gravityKernel, neighbourDependentPropertiesKernel);
         ComputeHelper.SetBuffer(compute, SpatialDataBuffer, "SpatialDataBuffer", gridHashKernel, gravityKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, neighbourDependentPropertiesKernel);
         ComputeHelper.SetBuffer(compute, SpatialOffsetsBuffer, "SpatialOffsetDataBuffer", gridHashKernel, gravityKernel, updatePositionKernel, smoothingRadiusKernel, correctionTermsKernel, neighbourDependentPropertiesKernel);
-        ComputeHelper.SetBuffer(compute, newOctreeBuffer, "NewOctreeBuffer", gravityKernel);
+        ComputeHelper.SetBuffer(compute, binaryTreeBuffer, "BinaryTreeBuffer", gravityKernel);
         ComputeHelper.SetBuffer(compute, renderBuffer1, "RenderBuffer", renderKernel);
         compute.SetInt("numParticles", particleCount);
 
@@ -152,8 +152,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         gravityReductionManager = new();
         gravityReductionManager.SetBuffers(gravityForceBuffer, gravityCorrectionBuffer, particleCount);
 
-        octreeReductionManager = new();
-        octreeReductionManager.SetBuffers(newOctreeBuffer, positionBuffer, mortonKeyBuffer, particleCount, particleMass);
+        BinaryTreeManager = new();
+        BinaryTreeManager.SetBuffers(binaryTreeBuffer, positionBuffer, mortonKeyBuffer, particleCount, particleMass);
 
         InitialiseParticleProperties();
 
@@ -220,14 +220,14 @@ public class NebulaParticleSimulator : MonoBehaviour
         // updates the entropy and calcualtes the visocity force, pressure force and XSPH correction
         ComputeHelper.Dispatch(compute, particleCount, neighbourDependentPropertiesKernel);
 
-        // GRAVITY AND OCTREE
+        // GRAVITY AND BINARY TREE
 
-        Profiler.BeginSample("Octree construction");
-        octreeReductionManager.ConstructOctree();
+        Profiler.BeginSample("Binary tree construction");
+        BinaryTreeManager.ConstructBinaryTree();
         Profiler.EndSample();
 
         Profiler.BeginSample("Gravity kernel");
-        ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity using the octree
+        ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity using the binary tree
         Profiler.EndSample();
         gravityReductionManager.PerformReduction(); // perform the reduction to get the gravity force correction value for this frame
 
@@ -417,11 +417,11 @@ public class NebulaParticleSimulator : MonoBehaviour
                               ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, 
                               entropyDataBuffer, gravityForceBuffer, gravityCorrectionBuffer,
                               globalDeltaTimeBuffer, renderBuffer1, renderBuffer2, positionBuffer,
-                              newOctreeBuffer, mortonKeyBuffer);
+                              binaryTreeBuffer, mortonKeyBuffer);
         
         timestepManager.ReleaseBuffers();
         gravityReductionManager.ReleaseBuffers();
-        octreeReductionManager.ReleaseBuffers();
+        BinaryTreeManager.ReleaseBuffers();
     }
 
     private void OnDrawGizmos()

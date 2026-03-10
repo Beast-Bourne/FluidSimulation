@@ -4,10 +4,10 @@ using static UnityEngine.Mathf;
 using System.Collections.Generic;
 
 // NOTE: can not simulate more than 256^3 (~16.7M) particles due to reduction buffer size limits in this class
-public class OctreeScript
+public class BinaryTreeManager
 {
     readonly ComputeShader reductionCompute;
-    readonly ComputeShader octreeCompute;
+    readonly ComputeShader binaryTreeCompute;
 
     // buffers for each level of reduction
     ComputeBuffer L0; // upto 256^3 (~16.7M) entries and 256^2 (~65500) outputs into the L1Input buffer
@@ -20,47 +20,41 @@ public class OctreeScript
     ComputeBuffer minL3;
 
     ComputeBuffer mortonBuffer;
-    ComputeBuffer binaryTreeBuffer;
-
     ComputeBuffer propsBuffer;
     ComputeBuffer parentBuffer;
-    ComputeBuffer atomicBuffer;
 
     // kernel ID
-    const int reductionKernel = 0;
-    const int mortonKeyKernel = 0;
+    const int reductionKernel = 0; // reduction compute
+    const int mortonKeyKernel = 0; // binaryTree compute
     const int sortKernel = 1;
     const int BuildBinaryTreeKernel = 2;
-    const int atomicBoundsKernel = 3;
-    const int CalculatePropertiesKernel = 4;
-    const int CalcBoundsKernel = 5;
+    const int CalculatePropertiesKernel = 3;
 
     // parameters
     int simParticleCount;
     int nodeCount;
     int sortStageCount;
 
-    public OctreeScript()
+    public BinaryTreeManager()
     {
         reductionCompute = ComputeHelper.LoadComputeShader("WorldBoundsReduction");
-        octreeCompute = ComputeHelper.LoadComputeShader("OctreeConstructor");
+        binaryTreeCompute = ComputeHelper.LoadComputeShader("OctreeConstructor");
     }
 
-    public void SetBuffers(ComputeBuffer octreeBuffer, ComputeBuffer positionBuffer, ComputeBuffer mortonKeyBuffer, int particleCount, float mass)
+    public void SetBuffers(ComputeBuffer binaryTreeBuffer, ComputeBuffer positionBuffer, ComputeBuffer mortonKeyBuffer, int particleCount, float mass)
     {
         simParticleCount = particleCount;
         nodeCount = (simParticleCount * 2) - 1;
         L0 = positionBuffer;
         sortStageCount = (int)Log(NextPowerOfTwo(simParticleCount), 2);
         mortonBuffer = mortonKeyBuffer;
-        binaryTreeBuffer = octreeBuffer;
 
-        octreeCompute.SetInt("particleCount", simParticleCount);
-        octreeCompute.SetInt("nodeCount", nodeCount);
-        octreeCompute.SetFloat("particleMass", mass);
-        ComputeHelper.SetBuffer(octreeCompute, octreeBuffer, "OctreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel, CalculatePropertiesKernel, CalcBoundsKernel);
-        ComputeHelper.SetBuffer(octreeCompute, positionBuffer, "PositionBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
-        ComputeHelper.SetBuffer(octreeCompute, mortonBuffer, "MortonBuffer", mortonKeyKernel, sortKernel, BuildBinaryTreeKernel);
+        binaryTreeCompute.SetInt("particleCount", simParticleCount);
+        binaryTreeCompute.SetInt("nodeCount", nodeCount);
+        binaryTreeCompute.SetFloat("particleMass", mass);
+        ComputeHelper.SetBuffer(binaryTreeCompute, binaryTreeBuffer, "BinaryTreeBuffer", mortonKeyKernel, BuildBinaryTreeKernel, CalculatePropertiesKernel);
+        ComputeHelper.SetBuffer(binaryTreeCompute, positionBuffer, "PositionBuffer", mortonKeyKernel, BuildBinaryTreeKernel);
+        ComputeHelper.SetBuffer(binaryTreeCompute, mortonBuffer, "MortonBuffer", mortonKeyKernel, sortKernel, BuildBinaryTreeKernel);
 
         InitialiseBuffers();
     }
@@ -77,28 +71,21 @@ public class OctreeScript
 
         propsBuffer = ComputeHelper.CreateStructuredBuffer<NodeProps>(nodeCount);
         parentBuffer = ComputeHelper.CreateStructuredBuffer<uint>(nodeCount);
-        atomicBuffer = ComputeHelper.CreateStructuredBuffer<AtomicProperties>(nodeCount);
+        
+        ComputeHelper.SetBuffer(binaryTreeCompute, parentBuffer, "ParentBuffer", BuildBinaryTreeKernel, CalculatePropertiesKernel);
 
-        ComputeHelper.SetBuffer(octreeCompute, atomicBuffer, "AtomicPropertiesBuffer", CalculatePropertiesKernel, BuildBinaryTreeKernel, CalcBoundsKernel, atomicBoundsKernel);
+        ComputeHelper.SetBuffer(binaryTreeCompute, propsBuffer, "NodePropertiesBuffer", CalculatePropertiesKernel, BuildBinaryTreeKernel);
 
-        ComputeHelper.SetBuffer(octreeCompute, parentBuffer, "ParentBuffer", BuildBinaryTreeKernel, CalculatePropertiesKernel, atomicBoundsKernel);
-
-        ComputeHelper.SetBuffer(octreeCompute, propsBuffer, "NodePropertiesBuffer", CalculatePropertiesKernel, BuildBinaryTreeKernel);
-
-        ComputeHelper.SetBuffer(octreeCompute, maxL3, "MaxBoundBuffer", mortonKeyKernel);
-        ComputeHelper.SetBuffer(octreeCompute, minL3, "MinBoundBuffer", mortonKeyKernel);
+        ComputeHelper.SetBuffer(binaryTreeCompute, maxL3, "MaxBoundBuffer", mortonKeyKernel);
+        ComputeHelper.SetBuffer(binaryTreeCompute, minL3, "MinBoundBuffer", mortonKeyKernel);
     }
 
-    public void ConstructOctree()
+    public void ConstructBinaryTree()
     {
         PerformReduction();
         sortMortonKeys();
 
-        ComputeHelper.Dispatch(octreeCompute, simParticleCount, BuildBinaryTreeKernel);
-
-        //ComputeHelper.Dispatch(octreeCompute, nodeCount, atomicBoundsKernel);
-        //ComputeHelper.Dispatch(octreeCompute, nodeCount, CalcBoundsKernel);
-
+        ComputeHelper.Dispatch(binaryTreeCompute, simParticleCount, BuildBinaryTreeKernel);
         CalcProps();
     }
 
@@ -133,7 +120,7 @@ public class OctreeScript
 
     private void sortMortonKeys()
     {
-        ComputeHelper.Dispatch(octreeCompute, simParticleCount, mortonKeyKernel);
+        ComputeHelper.Dispatch(binaryTreeCompute, simParticleCount, mortonKeyKernel);
 
         for (int stageIndex = 0; stageIndex < sortStageCount; stageIndex++)
         {
@@ -141,10 +128,10 @@ public class OctreeScript
             {
                 int groupWidth = 1 << (stageIndex - stepIndex);
                 int groupHeight = 2 * groupWidth - 1;
-                octreeCompute.SetInt("groupWidth", groupWidth);
-                octreeCompute.SetInt("groupHeight", groupHeight);
-                octreeCompute.SetInt("stepIndex", stepIndex);
-                ComputeHelper.Dispatch(octreeCompute, NextPowerOfTwo(simParticleCount) / 2, sortKernel);
+                binaryTreeCompute.SetInt("groupWidth", groupWidth);
+                binaryTreeCompute.SetInt("groupHeight", groupHeight);
+                binaryTreeCompute.SetInt("stepIndex", stepIndex);
+                ComputeHelper.Dispatch(binaryTreeCompute, NextPowerOfTwo(simParticleCount) / 2, sortKernel);
             }
         }
     }
@@ -153,8 +140,8 @@ public class OctreeScript
     {
         for (int i = 1; i < 31; i++)
         {
-            octreeCompute.SetInt("depthPass", i);
-            ComputeHelper.Dispatch(octreeCompute, simParticleCount-1, CalculatePropertiesKernel);
+            binaryTreeCompute.SetInt("depthPass", i);
+            ComputeHelper.Dispatch(binaryTreeCompute, simParticleCount-1, CalculatePropertiesKernel);
         }
     }
 
@@ -174,11 +161,11 @@ public class OctreeScript
 
     public void ReleaseBuffers()
     {
-        ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3, propsBuffer, parentBuffer, atomicBuffer);
+        ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3, propsBuffer, parentBuffer);
     }
 }
 
-public struct NewOctreeNode
+public struct BinaryTreeNode
 {
     public uint leftChild;
     public uint rightChild;
@@ -193,19 +180,4 @@ public struct NodeProps
     public float3 minBound;
     public float3 maxBound;
     public uint depth;
-}
-
-public struct AtomicProperties
-{
-    uint minX;
-    uint minY;
-    uint minZ;
-
-    uint maxX;
-    uint maxY;
-    uint maxZ;
-
-    float comX;
-    float comY;
-    float comZ;
 }

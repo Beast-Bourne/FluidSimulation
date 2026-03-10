@@ -36,23 +36,7 @@ struct ParticleEntropyData
     float fusionEnergyRate;
 };
 
-// NOTE: should optimise this later (need padding for alignment)
-// compress CentreOfMass to float4 where w is mass (float 3 causes alignment issues, wasting bandwidth)
-// compress centre and size to float4 where w is size
-// change bool to uint
-struct OctreeNode
-{
-    float mass;
-    float3 centreOfMass;
-    float3 centre;
-    float size;
-    bool hasChildren;
-    uint firstChildIndex;
-    uint parentIndex;
-    uint spatialStartIndex;
-};
-
-struct NewOctreeNode
+struct BinaryTreeNode
 {
     uint leftChild;
     uint rightChild;
@@ -110,7 +94,7 @@ RWStructuredBuffer<SpatialData> SpatialDataBuffer;
 RWStructuredBuffer<uint3> SpatialOffsetDataBuffer; // .x is the offset for stage 1, .y is the offset for stage 2, and .z is the offset for stage 3
 
 // octree buffers
-RWStructuredBuffer<NewOctreeNode> NewOctreeBuffer;
+RWStructuredBuffer<BinaryTreeNode> BinaryTreeBuffer;
 
 // spatial hashing constants
 const float stage1Size;
@@ -686,7 +670,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     {
         stackPtr -= 1;
         uint index = stack[stackPtr];
-        NewOctreeNode node = NewOctreeBuffer[index];
+        BinaryTreeNode node = BinaryTreeBuffer[index];
         
         float3 offset = node.centerOfMass.xyz - predPos;
         float sqrDist = max(dot(offset, offset), sqrSoftening);

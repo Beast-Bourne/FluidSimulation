@@ -13873,7 +13873,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   particlesPerSide: 40
   spawnCentre: {x: 0, y: 0, z: 0}
-  spawnSize: 120
+  spawnSize: 90
   VelocitySigma: 0
   randomOffsetStrength: 1
 --- !u!1 &1374176186
