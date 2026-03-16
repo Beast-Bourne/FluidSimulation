@@ -38,7 +38,7 @@ public class BinaryTreeManager
     public BinaryTreeManager()
     {
         reductionCompute = ComputeHelper.LoadComputeShader("WorldBoundsReduction");
-        binaryTreeCompute = ComputeHelper.LoadComputeShader("OctreeConstructor");
+        binaryTreeCompute = ComputeHelper.LoadComputeShader("BinaryTreeConstructor");
     }
 
     public void SetBuffers(ComputeBuffer binaryTreeBuffer, ComputeBuffer positionBuffer, ComputeBuffer mortonKeyBuffer, int particleCount, float mass)
@@ -145,20 +145,6 @@ public class BinaryTreeManager
         }
     }
 
-    private void DebugLog()
-    {
-        NodeProps[] props = new NodeProps[nodeCount];
-        propsBuffer.GetData(props);
-        if (props[0].depth >= 70) Debug.Log($"root node at depth: {props[0].depth}");
-
-        /*
-        NewOctreeNode[] sortedKeys = new NewOctreeNode[nodeCount];
-        binaryTreeBuffer.GetData(sortedKeys);
-
-        Debug.Log($"root node mass: {sortedKeys[64000-1].centerOfMass.w}");
-        */
-    }
-
     public void ReleaseBuffers()
     {
         ComputeHelper.Release(L0, maxL1, maxL2, maxL3, minL1, minL2, minL3, propsBuffer, parentBuffer);
@@ -169,7 +155,6 @@ public struct BinaryTreeNode
 {
     public uint leftChild;
     public uint rightChild;
-    public uint firstParticle;
     public uint particleCount;
     public float size2;
     public float4 centerOfMass;

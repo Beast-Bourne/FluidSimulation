@@ -8,10 +8,7 @@ struct Node
 {
     uint leftChild;
     uint rightChild;
-    
-    uint firstParticle;
     uint particleCount;
-    
     float size2;
     float4 centerOfMass;
 };
@@ -170,7 +167,6 @@ void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
     Node leafNode;
     leafNode.leftChild = -1;
     leafNode.rightChild = -1;
-    leafNode.firstParticle = i; // the index of the particle corresponding to this leaf node (index is for the morton buffer, not the particle buffer)
     leafNode.particleCount = 1; // leaf nodes represent a single particle
     leafNode.size2 = 0.0f; // size is not used for leaf nodes
     leafNode.centerOfMass = float4(PositionBuffer[particleIndex].xyz, particleMass);
@@ -245,7 +241,6 @@ void BuildBinaryTreeKernel(uint3 id : SV_DispatchThreadID)
     Node treeNode;
     treeNode.leftChild = leftChild;
     treeNode.rightChild = rightChild;
-    treeNode.firstParticle = first;
     treeNode.particleCount = nodeRange;
     treeNode.centerOfMass = float4(0, 0, 0, 0);
     treeNode.size2 = 0.0f;

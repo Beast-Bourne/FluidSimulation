@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
 using Unity.Mathematics;
-using UnityEngine.Profiling;
 using UnityEngine;
 
 public class NebulaParticleSimulator : MonoBehaviour
@@ -204,36 +203,29 @@ public class NebulaParticleSimulator : MonoBehaviour
         // SMOOTHING RADIUS AND DENSITY
         // calculates the smoothing radius and density
         ComputeHelper.Dispatch(compute, particleCount, smoothingRadiusKernel);
-
+        
         // CORRECTIONS
         // calculates the balsara factor and pressure correction terms
         ComputeHelper.Dispatch(compute, particleCount, correctionTermsKernel);
-
+        
         // ADAPTIVE DELTA TIME
         ComputeHelper.Dispatch(compute, particleCount, deltaTimeKernel);
         timestepManager.PerformReduction();
-
+        
         // FUSION
         ComputeHelper.Dispatch(compute, particleCount, fusionKernel);
-
+        
         // NEIGHBOUR DPENDENT PROPERTIES
         // updates the entropy and calcualtes the visocity force, pressure force and XSPH correction
         ComputeHelper.Dispatch(compute, particleCount, neighbourDependentPropertiesKernel);
-
-        // GRAVITY AND BINARY TREE
-
-        Profiler.BeginSample("Binary tree construction");
+        
         BinaryTreeManager.ConstructBinaryTree();
-        Profiler.EndSample();
-
-        Profiler.BeginSample("Gravity kernel");
         ComputeHelper.Dispatch(compute, particleCount, gravityKernel); // apply gravity using the binary tree
-        Profiler.EndSample();
         gravityReductionManager.PerformReduction(); // perform the reduction to get the gravity force correction value for this frame
-
+        
         // APPLY VELOCITY
         ComputeHelper.Dispatch(compute, particleCount, updatePositionKernel);
-
+        
         // RENDERING
         // call the render kernel to write the next frames render data then call to display the current frames render data
         // the render / write buffers are then swapped (prevents memory stalls from reading and writing to the same buffer at the same time)
@@ -353,24 +345,6 @@ public class NebulaParticleSimulator : MonoBehaviour
             logData.Add($"{totalTimeElapsed:F2},{fps:F2}");
             timeElapsed = 0.0f;
         }
-    }
-
-    void ShowDebugData()
-    {
-        float3[] debugData = new float3[particleCount];
-        debugBuffer.GetData(debugData);
-
-        float average = 0.0f;
-        float max = float.MinValue;
-        float min = float.MaxValue;
-        for (int i = 0; i < debugData.Length; i++)
-        {
-            average += debugData[i].x;
-            if (debugData[i].x > max) max = debugData[i].x;
-            if (debugData[i].x < min) min = debugData[i].x;
-        }
-        average /= particleCount;
-        Debug.Log($"average: {average}, maximum: {max}, minumum: {min}");
     }
 
     private void OnApplicationQuit()

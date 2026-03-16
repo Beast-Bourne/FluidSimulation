@@ -13871,9 +13871,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b9b0266f38cbc4749a8abb04c0633360, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particlesPerSide: 40
+  particlesPerSide: 60
   spawnCentre: {x: 0, y: 0, z: 0}
-  spawnSize: 90
+  spawnSize: 120
   VelocitySigma: 0
   randomOffsetStrength: 1
 --- !u!1 &1374176186
@@ -14001,7 +14001,7 @@ MonoBehaviour:
   spatialStage1Size: 0.75
   spatialStage2Size: 1
   spatialStage3Size: 1.25
-  gravity: 0.1
+  gravity: 0.0025
   particleMass: 1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01

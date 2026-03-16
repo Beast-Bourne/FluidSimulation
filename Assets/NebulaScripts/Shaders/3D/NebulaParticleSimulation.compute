@@ -40,10 +40,7 @@ struct BinaryTreeNode
 {
     uint leftChild;
     uint rightChild;
-    
-    uint firstParticle;
     uint particleCount;
-    
     float size2;
     float4 centerOfMass;
 };
@@ -298,29 +295,33 @@ void UpdateGridHash(uint3 id : SV_DispatchThreadID)
     uint index = id.x;
     float3 predPos = PositionBuffer[index].xyz; // get predicted position
     
+    SpatialData data;
+    
     // spatial hash stage 1
     int3 gridPos = GetGridPos3D(predPos, stage1Size);
     uint hash = HashGridPos3D(gridPos);
     uint key = KeyFromHash(hash, numParticles);
-    SpatialDataBuffer[id.x].index1 = index;
-    SpatialDataBuffer[id.x].hash1 = hash;
-    SpatialDataBuffer[id.x].key1 = key;
+    data.index1 = index;
+    data.hash1 = hash;
+    data.key1 = key;
     
     // spatial hash stage 2
     int3 gridPos2 = GetGridPos3D(predPos, stage2Size);
     uint hash2 = HashGridPos3D(gridPos2);
     uint key2 = KeyFromHash(hash2, numParticles);
-    SpatialDataBuffer[id.x].index2 = index;
-    SpatialDataBuffer[id.x].hash2 = hash2;
-    SpatialDataBuffer[id.x].key2 = key2;
+    data.index2 = index;
+    data.hash2 = hash2;
+    data.key2 = key2;
     
     // spatial hash stage 3
     int3 gridPos3 = GetGridPos3D(predPos, stage3Size);
     uint hash3 = HashGridPos3D(gridPos3);
     uint key3 = KeyFromHash(hash3, numParticles);
-    SpatialDataBuffer[id.x].index3 = index;
-    SpatialDataBuffer[id.x].hash3 = hash3;
-    SpatialDataBuffer[id.x].key3 = key3;
+    data.index3 = index;
+    data.hash3 = hash3;
+    data.key3 = key3;
+    
+    SpatialDataBuffer[id.x] = data;
 }
 
 // kernel 2
