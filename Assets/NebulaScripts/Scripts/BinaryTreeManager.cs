@@ -171,7 +171,7 @@ public struct BinaryTreeNode
     public uint rightChild;
     public uint firstParticle;
     public uint particleCount;
-    public float size;
+    public float size2;
     public float4 centerOfMass;
 }
 

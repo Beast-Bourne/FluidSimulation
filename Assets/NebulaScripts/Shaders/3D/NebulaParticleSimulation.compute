@@ -44,7 +44,7 @@ struct BinaryTreeNode
     uint firstParticle;
     uint particleCount;
     
-    float size;
+    float size2;
     float4 centerOfMass;
 };
 
@@ -660,7 +660,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     
     float sqrSoftening = softeningLength * softeningLength;
     
-    uint stack[64]; // stack for storing indices to visit. This gets around the issue of recursion in compute shaders
+    uint stack[32]; // stack for storing indices to visit. This gets around the issue of recursion in compute shaders
     uint stackPtr = 0;
     
     stack[0] = 0;
@@ -674,33 +674,28 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
         
         float3 offset = node.centerOfMass.xyz - predPos;
         float sqrDist = max(dot(offset, offset), sqrSoftening);
-        float dist = sqrt(sqrDist);
-        float3 dir = offset / dist;
+        
+        float invDist = rsqrt(sqrDist);
+        float invDist3 = invDist * invDist * invDist;
         
         // if its a leaf node then just calculate the gravity accel
         if (node.particleCount == 1)
         {
-            float accelMag = gravity * node.centerOfMass.w * pow(sqrDist, -1.5);
-            gravityAccel += dir * accelMag;
+            float accelMag = gravity * node.centerOfMass.w * invDist3;
+            gravityAccel += offset * accelMag;
         }
-        
         // if its an internal node then check the barnes hut criteria
-        float size = node.size;
-        float theta = size / dist;
-        
         // if it passes the criteria then calculate the gravity accel using the center of mass properties of the node
-        if (theta < BarnesHutTheta)
+        else if (node.size2 < (BarnesHutTheta * BarnesHutTheta * sqrDist))
         {
-            float accelMag = gravity * node.centerOfMass.w * pow(sqrDist, -1.5);
-            gravityAccel += dir * accelMag;
+            float accelMag = gravity * node.centerOfMass.w * invDist3;
+            gravityAccel += offset * accelMag;
         }
         // otherwise add the children to the stack to be processed
         else
         {
-            stack[stackPtr] = node.leftChild;
-            stackPtr++;
-            stack[stackPtr] = node.rightChild;
-            stackPtr++;
+            stack[stackPtr++] = node.leftChild;
+            stack[stackPtr++] = node.rightChild;
         }
     }
     
