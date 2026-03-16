@@ -21,9 +21,6 @@ struct ParticleData
     float3 velocity;
     float density;
     float entropy;
-    float pressureCorrection;
-    float balsaraFactor;
-    float temperature;
     float hydroWeight;
     float meanMolecularWeight;
 };
@@ -34,6 +31,14 @@ struct ParticleEntropyData
     float soundSpeed;
     float divV;
     float fusionEnergyRate;
+};
+
+struct ExtraParticleData
+{
+    float densFactor;
+    float pressureCorrection;
+    float balsaraFactor;
+    float temperature;
 };
 
 struct BinaryTreeNode
@@ -66,6 +71,7 @@ static const int threadCount = 128;
 
 // property buffers
 RWStructuredBuffer<ParticleData> ParticleBuffer;
+RWStructuredBuffer<ExtraParticleData> ParticleExtraBuffer;
 RWStructuredBuffer<float4> PositionBuffer;
 RWStructuredBuffer<ParticleEntropyData> EntropyDataBuffer;
 RWStructuredBuffer<float3> ResultantForces;
@@ -80,9 +86,6 @@ RWStructuredBuffer<float> GlobalDeltaTimeBuffer; // holds the global delta time 
 
 // render buffer
 RWStructuredBuffer<float4> RenderBuffer;
-
-// debug buffers
-RWStructuredBuffer<float3> DebugBuffer;
 
 // Spatial hash buffers
 // SpatialDataBuffer[i] stores the spatial hash data for the particles. stores each layer for efficient access
@@ -429,14 +432,19 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
         }
     }
     
+    ExtraParticleData extraData;
+    float densFactor = pow(abs(particle.density), adiabaticIndex - 1);
+    extraData.densFactor = densFactor;
+    extraData.temperature = (protonMass * particle.meanMolecularWeight / boltzmannConstant) * particle.entropy * densFactor;
+    
     // balsara factor finalisation
     float divMag = abs(divV);
     float curlMag = length(curlV);
         
-    particle.balsaraFactor = divMag / (divMag + curlMag + 1e-4);
+    extraData.balsaraFactor = divMag / (divMag + curlMag + 1e-4);
     
     // adaptive viscosity alpha calculations
-    float soundSpeed = sqrt(adiabaticIndex * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1));
+    float soundSpeed = sqrt(adiabaticIndex * particle.entropy * densFactor);
     
     float tau = smoothRad / (soundSpeed * 0.1f);
     float alpha = entropyData.alpha;
@@ -455,10 +463,10 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
     newCorrection = clamp(newCorrection, 0.5f, 2.0f);
     
     float pressureTerm = (1.0f / (density * density * newCorrection));
-    particle.pressureCorrection = pressureTerm;
+    extraData.pressureCorrection = pressureTerm;
     
     // buffer writes
-    ParticleBuffer[id.x] = particle;
+    ParticleExtraBuffer[id.x] = extraData;
     EntropyDataBuffer[id.x] = entropyData;
 }
 
@@ -493,11 +501,9 @@ void UpdateFusionRate(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     ParticleData particle = ParticleBuffer[id.x];
     ParticleEntropyData entropyData = EntropyDataBuffer[id.x];
+    float temp = ParticleExtraBuffer[id.x].temperature;
     
-    // calculate temperature this frame
-    particle.temperature = (protonMass * particle.meanMolecularWeight / boltzmannConstant) * particle.entropy * pow(abs(particle.density), adiabaticIndex - 1);
-    
-    float fusionRate = CalculateFusionRate(particle.temperature, particle.density, particle.hydroWeight);
+    float fusionRate = CalculateFusionRate(temp, particle.density, particle.hydroWeight);
     float hydroChange = fusionRate * GlobalDeltaTimeBuffer[0] / energyPerUnitMass;
     
     float hydroWeight = max(particle.hydroWeight - hydroChange, 0.0f);
@@ -521,6 +527,7 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     ParticleData particle = ParticleBuffer[id.x];
     ParticleEntropyData entropyData = EntropyDataBuffer[id.x];
+    ExtraParticleData extraData = ParticleExtraBuffer[id.x];
     
     float3 predPos = PositionBuffer[id.x].xyz;
     float smoothRad = PositionBuffer[id.x].w;
@@ -559,6 +566,8 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
             
             ParticleData adjParticle = ParticleBuffer[adjIndex];
             ParticleEntropyData adjEntropyData = EntropyDataBuffer[adjIndex];
+            ExtraParticleData adjExtraData = ParticleExtraBuffer[adjIndex];
+            
             float3 adjPredPos = PositionBuffer[adjIndex].xyz;
             float adjSmoothRad = PositionBuffer[adjIndex].w;
             
@@ -580,17 +589,14 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
             float3 gradW_j = WendlandC2Derivative(dist, adjSmoothRad) * dirFromAdj;
             float3 gradW_ij = 0.5 * (gradW_i + gradW_j);
             
-            float densFactor = pow(abs(particle.density), adiabaticIndex - 1);
-            float adjDensFactor = pow(abs(adjParticle.density), adiabaticIndex - 1);
-            
             float3 relVel = particle.velocity - adjParticle.velocity;
             float velDivTerm = dot(relVel, gradW_ij);
             
             // Entropy calculations
             // conduction heating term
-            float tempDiff = particle.temperature - adjParticle.temperature;
+            float tempDiff = extraData.temperature - adjExtraData.temperature;
             float conductionFlux = (particleMass * conductionCoefficient * tempDiff * dot(offsetFromAdj, gradW_ij)) / (particle.density * adjParticle.density * dist);
-            float entropyFactor = (adiabaticIndex - 1) / densFactor;
+            float entropyFactor = (adiabaticIndex - 1) / extraData.densFactor;
             condTerm += (conductionFlux * entropyFactor);
             
             // viscosity only applies for converging particles to model shock dissipation
@@ -606,7 +612,7 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
                 float massFactor = (avgSmoothRad * relVelAlongOffset) / (dist + (viscEpsilon * avgSmoothRad * avgSmoothRad));
                 massFactor = clamp(massFactor, -5.0f, 0.0f);
                 
-                float avgBalsara = 0.5f * (particle.balsaraFactor + adjParticle.balsaraFactor);
+                float avgBalsara = 0.5f * (extraData.balsaraFactor + adjExtraData.balsaraFactor);
                 float artVisc = avgBalsara * (-avgAlpha * avgSoundSpeed * massFactor + avgBeta * massFactor * massFactor) / avgDensity;
             
                 float3 forceTerm = -particleMass * artVisc * gradW_ij;
@@ -620,7 +626,7 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
             
             // pressure calculations
             float pressure_j = particle.entropy * pow(abs(adjParticle.density), adiabaticIndex);
-            pressureForce += -particleMass * ((particle.pressureCorrection * pressure_i * gradW_i) + (adjParticle.pressureCorrection * pressure_j * gradW_j));
+            pressureForce += -particleMass * ((extraData.pressureCorrection * pressure_i * gradW_i) + (adjExtraData.pressureCorrection * pressure_j * gradW_j));
             
             // XSPH calculations
             float avgDensity = 0.5f * (particle.density + adjParticle.density);
@@ -748,7 +754,7 @@ void RenderKernel(uint3 id : SV_DispatchThreadID)
     values[0] = particle.density;
     values[1] = length(particle.velocity);
     values[2] = particle.entropy;
-    values[3] = particle.temperature;
+    values[3] = ParticleExtraBuffer[id.x].temperature;
     values[4] = PositionBuffer[id.x].w;
     values[5] = particle.hydroWeight;
     
