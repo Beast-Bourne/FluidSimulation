@@ -15,16 +15,17 @@
 #include "../GridHelper.hlsl"
 #include "../InfluenceKernels.hlsl"
 
+// 32-byte aligned
 struct ParticleData
 {
-    float3 position;
-    float3 velocity;
+    float4 velocity; // .w is padding
     float density;
     float entropy;
     float hydroWeight;
     float meanMolecularWeight;
 };
 
+// 16-byte aligned
 struct ParticleEntropyData
 {
     float alpha;
@@ -33,6 +34,7 @@ struct ParticleEntropyData
     float fusionEnergyRate;
 };
 
+// 16-byte aligned
 struct ExtraParticleData
 {
     float densFactor;
@@ -41,6 +43,7 @@ struct ExtraParticleData
     float temperature;
 };
 
+// 32-byte aligned
 struct BinaryTreeNode
 {
     uint leftChild;
@@ -50,8 +53,7 @@ struct BinaryTreeNode
     float4 centerOfMass;
 };
 
-// NOTE: change to using 3 uint3s instead of 9 uints for better memory access patterns
-// look into: currently is 36 bytes but memory fetches in 32 byte chunks
+// NOTE: use of 3 layer so spatial hashing is a limiting factor in the frame time
 struct SpatialData
 {
     uint index1;
@@ -70,9 +72,10 @@ struct SpatialData
 static const int threadCount = 128;
 
 // property buffers
+RWStructuredBuffer<float4> RenderPositionBuffer; // .xyz is the real position of the particle used for rendering, .w is padding
 RWStructuredBuffer<ParticleData> ParticleBuffer;
 RWStructuredBuffer<ExtraParticleData> ParticleExtraBuffer;
-RWStructuredBuffer<float4> PositionBuffer;
+RWStructuredBuffer<float4> PositionBuffer; // .xyz is the predicted position, .w is the smoothing radius
 RWStructuredBuffer<ParticleEntropyData> EntropyDataBuffer;
 RWStructuredBuffer<float3> ResultantForces;
 
@@ -170,7 +173,7 @@ float LambdaFunction(float temp)
     return coolingLambda * pow(abs(temp), coolingAlpha);
 }
 
-float ApplyCooling(float entropy, float dens, float meanMolecularWeight)
+float ApplyCooling(float entropy, float dens, float meanMolecularWeight, float temperature)
 {
     float originEntropy = entropy;
     float mu_mp = meanMolecularWeight * protonMass;
@@ -181,8 +184,7 @@ float ApplyCooling(float entropy, float dens, float meanMolecularWeight)
     {
         float dt = min(timeRemaining, GlobalDeltaTimeBuffer[0] / subcycles);
         
-        float temp = (mu_mp / boltzmannConstant) * entropy * pow(abs(dens), adiabaticIndex - 1);
-        float Lambda = LambdaFunction(temp);
+        float Lambda = LambdaFunction(temperature);
         
         float dS_dt = -(adiabaticIndex - 1) * Lambda * pow(abs(dens), 2 - adiabaticIndex) / (mu_mp * mu_mp);
         float newEntropy = entropy + (dS_dt * dt);
@@ -210,7 +212,6 @@ uint GetTargetLayer(float smoothRad)
     return (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3;
 }
 
-// NOTE: need to tune 'eta' to get good results (do this after optimising for more particles)
 float GetTargetSmoothRad(float density)
 {
     const float eta = 1.2f;
@@ -219,23 +220,22 @@ float GetTargetSmoothRad(float density)
 
 }
 
-// NOTE: Maybe test the difference between density using 'h' and 'average h'
-// density doesn't need to be symetrical since its a scalar but since its used in force calculations i think it might affect stability
 float CalculateParticlesDensity(float3 predPos, float smoothRad, uint particleIndex)
 {
     int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(smoothRad));
     float density = 0;
     float sqrRadius = smoothRad * smoothRad;
+    uint spatialLayer = GetTargetLayer(smoothRad);
     
     for (int i = 0; i < 27; i++)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+        uint index = GetSpatialOffsetFromLayer(key, spatialLayer);
         
         while (index < numParticles)
         {
-            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+            uint3 indexData = GetIndexDataFromLayer(index, spatialLayer);
             index++;
             
             if (indexData[2] != key) break; // if the key is wrong then exit the loop
@@ -248,7 +248,7 @@ float CalculateParticlesDensity(float3 predPos, float smoothRad, uint particleIn
             float3 offsetFromAdjacent = predPos - PositionBuffer[adjacentIndex].xyz;
             float sqrDist = dot(offsetFromAdjacent, offsetFromAdjacent);
             
-            if (sqrDist > smoothRad * smoothRad) continue; // if the particle is outside the smoothing radius then skip it
+            if (sqrDist > sqrRadius) continue; // if the particle is outside the smoothing radius then skip it
             
             float dist = sqrt(sqrDist);
             density += (WendlandC2(dist, smoothRad) * particleMass);
@@ -264,13 +264,15 @@ float CalculateFusionRate(float temp, float density, float hydroWeight)
     if (density < fusionDensityThreshold) return 0.0f;
     
     // NOTE: this is a simple proton-proton fusion rate equation (does not work for CNO cycle)
-    float rate = fusionRateCoefficient * pow(temp/fusionTempThreshold, 4) * density * hydroWeight * hydroWeight;
+    float t = temp / fusionTempThreshold;
+    float t4 = t * t * t * t;
+    
+    float rate = fusionRateCoefficient * t4 * density * hydroWeight * hydroWeight;
     return rate;
 }
 
 // kernel 0
 // updates the predicted positions of the particles
-// NOTE: look into having the predictions reflect particles off the bounds rather than just clamping them
 [numthreads(threadCount,1,1)]
 void UpdatePredictions(uint3 id : SV_DispatchThreadID)
 {
@@ -279,10 +281,8 @@ void UpdatePredictions(uint3 id : SV_DispatchThreadID)
     // reset forces
     ResultantForces[id.x] = float3(0, 0, 0);
     
-    ParticleData particle = ParticleBuffer[id.x];
-    
-    float3 PredPos = particle.position + (particle.velocity * GlobalDeltaTimeBuffer[0] * 0.2f);
-    
+    // update predicted position
+    float3 PredPos = RenderPositionBuffer[id.x].xyz + (ParticleBuffer[id.x].velocity.xyz * GlobalDeltaTimeBuffer[0] * 0.2f);
     PositionBuffer[id.x].xyz = PredPos;
 }
 
@@ -371,6 +371,7 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
     
     float3 predPos = PositionBuffer[id.x].xyz;
     float smoothRad = PositionBuffer[id.x].w;
+    uint spatialLayer = GetTargetLayer(smoothRad);
     int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(smoothRad));
     
     // variables for storing neighbour contributions
@@ -384,12 +385,12 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+        uint index = GetSpatialOffsetFromLayer(key, spatialLayer);
         
         while (index < numParticles)
         {
             // check for valid interaction
-            uint3 indexData = GetIndexDataFromLayer(index, (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3);
+            uint3 indexData = GetIndexDataFromLayer(index, spatialLayer);
             index++;
             
             if (indexData[2] != key) break;
@@ -423,7 +424,7 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
             
             // balsara factor calculations
             float m_dens = particleMass / adjParticle.density;
-            float3 relVel = adjParticle.velocity - particle.velocity;
+            float3 relVel = adjParticle.velocity.xyz - particle.velocity.xyz;
             divV += m_dens * dot(relVel, gradW_ij);
             curlV += m_dens * cross(relVel, gradW_ij);
             
@@ -532,7 +533,8 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
     float3 predPos = PositionBuffer[id.x].xyz;
     float smoothRad = PositionBuffer[id.x].w;
     
-    int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(10.5f));
+    int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(smoothRad));
+    uint spatialLayer = GetTargetLayer(smoothRad);
     
     // variables for storing neighbour contributions
     float viscTerm = 0.0;
@@ -543,19 +545,19 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
     float pressure_i = particle.entropy * pow(abs(particle.density), adiabaticIndex);
     float3 pressureForce = float3(0, 0, 0);
     
-    float3 xsph = float3(0, 0, 0);
+    float4 xsph = float4(0, 0, 0, 0);
     
     // neighbour loop
     for (int i = 0; i < 27; i++)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, 3);
+        uint index = GetSpatialOffsetFromLayer(key, spatialLayer);
         
         while (index < numParticles)
         {
             // check for valid interaction
-            uint3 indexData = GetIndexDataFromLayer(index, 3);
+            uint3 indexData = GetIndexDataFromLayer(index, spatialLayer);
             index++;
             
             if (indexData[2] != key) break;
@@ -589,7 +591,7 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
             float3 gradW_j = WendlandC2Derivative(dist, adjSmoothRad) * dirFromAdj;
             float3 gradW_ij = 0.5 * (gradW_i + gradW_j);
             
-            float3 relVel = particle.velocity - adjParticle.velocity;
+            float3 relVel = particle.velocity.xyz - adjParticle.velocity.xyz;
             float velDivTerm = dot(relVel, gradW_ij);
             
             // Entropy calculations
@@ -625,7 +627,7 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
             }
             
             // pressure calculations
-            float pressure_j = particle.entropy * pow(abs(adjParticle.density), adiabaticIndex);
+            float pressure_j = adjParticle.entropy * pow(abs(adjParticle.density), adiabaticIndex);
             pressureForce += -particleMass * ((extraData.pressureCorrection * pressure_i * gradW_i) + (adjExtraData.pressureCorrection * pressure_j * gradW_j));
             
             // XSPH calculations
@@ -635,12 +637,12 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
     }
     
     // entropy finalisation
-    float entropyFactor = (adiabaticIndex - 1) * pow(abs(particle.density), 1-adiabaticIndex);
+    float entropyFactor = (adiabaticIndex - 1) / extraData.densFactor;
     float fusionTerm = entropyData.fusionEnergyRate * entropyFactor;
     fusionTerm = min(fusionTerm, particle.entropy * 0.005f);
 
     float change = (viscTerm + condTerm + fusionTerm) * GlobalDeltaTimeBuffer[0];
-    float coolingChange = ApplyCooling(particle.entropy, particle.density, particle.meanMolecularWeight);
+    float coolingChange = ApplyCooling(particle.entropy, particle.density, particle.meanMolecularWeight, extraData.temperature);
     change += coolingChange;
     particle.entropy += change;
     
@@ -666,6 +668,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
     float3 predPos = PositionBuffer[id.x].xyz;
     
     float sqrSoftening = softeningLength * softeningLength;
+    float BarnesHutTheta2 = BarnesHutTheta * BarnesHutTheta;
     
     uint stack[32]; // stack for storing indices to visit. This gets around the issue of recursion in compute shaders
     uint stackPtr = 0;
@@ -693,7 +696,7 @@ void CalculateGravity(uint3 id : SV_DispatchThreadID)
         }
         // if its an internal node then check the barnes hut criteria
         // if it passes the criteria then calculate the gravity accel using the center of mass properties of the node
-        else if (node.size2 < (BarnesHutTheta * BarnesHutTheta * sqrDist))
+        else if (node.size2 < (BarnesHutTheta2 * sqrDist))
         {
             float accelMag = gravity * node.centerOfMass.w * invDist3;
             gravityAccel += offset * accelMag;
@@ -720,8 +723,8 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     ParticleData particle = ParticleBuffer[id.x];
     float dt = GlobalDeltaTimeBuffer[0];
     
-    float3 vel = particle.velocity;
-    float3 pos = particle.position;
+    float3 vel = particle.velocity.xyz;
+    float3 pos = RenderPositionBuffer[id.x].xyz;
     
     vel += (ResultantForces[id.x] + GravityCorrectionBuffer[0]) * dt;
     pos += vel * dt;
@@ -735,8 +738,8 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     pos = clamp(pos, minBound, maxBound); // clamp the position to be within the bounds
     vel *= 1 - 2 * (hitMin + hitMax); // either reflects or does nothing to the velocity depening on of the particle hit the bounds in each axis
     
-    particle.position = pos;
-    particle.velocity = vel;
+    RenderPositionBuffer[id.x] = float4(pos, 0.0f);
+    particle.velocity = float4(vel, 0);
     
     ParticleBuffer[id.x] = particle;
 }
@@ -752,13 +755,13 @@ void RenderKernel(uint3 id : SV_DispatchThreadID)
     
     float values[6];
     values[0] = particle.density;
-    values[1] = length(particle.velocity);
+    values[1] = length(particle.velocity.xyz);
     values[2] = particle.entropy;
     values[3] = ParticleExtraBuffer[id.x].temperature;
     values[4] = PositionBuffer[id.x].w;
     values[5] = particle.hydroWeight;
     
-    float4 data = float4(particle.position, values[renderMode]);
+    float4 data = float4(RenderPositionBuffer[id.x].xyz, values[renderMode]);
     RenderBuffer[id.x] = data;
 }
 

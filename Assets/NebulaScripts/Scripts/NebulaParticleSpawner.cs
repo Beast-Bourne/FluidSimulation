@@ -41,7 +41,7 @@ public class NebulaParticleSpawner : MonoBehaviour
 
                     float3 randOffset = UnityEngine.Random.insideUnitSphere * randomOffsetStrength;
                     data.positions[particleNum] = new float3(px, py, pz) + randOffset;
-                    data.velocities[particleNum] = new float3(velX, velY, velZ);
+                    data.velocities[particleNum] = new float4(velX, velY, velZ, 0.0f);
                     particleNum++;
                 }
             }
@@ -72,13 +72,13 @@ public class NebulaParticleSpawner : MonoBehaviour
     public struct ParticleSpawnData
     {
         public float3[] positions;
-        public float3[] velocities;
+        public float4[] velocities;
 
         // Constructor
         public ParticleSpawnData(int num)
         {
             positions = new float3[num];
-            velocities = new float3[num];
+            velocities = new float4[num];
         }
     }
 }

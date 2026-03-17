@@ -15,6 +15,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     public ComputeBuffer positionBuffer { get; private set; }
     public ComputeBuffer renderBuffer1 { get; private set; }
     public ComputeBuffer renderBuffer2 { get; private set; }
+    ComputeBuffer renderPositionBuffer;
     ComputeBuffer entropyDataBuffer;
     ComputeBuffer ResultantForceBuffer;
     ComputeBuffer gravityForceBuffer;
@@ -84,7 +85,7 @@ public class NebulaParticleSimulator : MonoBehaviour
     private bool canWriteLog = false;
 
     // kernel IDs for the compute shader
-    const int UpdatePredictionsKernel = 0;
+    const int UpdatePredictionsKernel = 0; 
     const int gridHashKernel = 1;
     const int smoothingRadiusKernel = 2;
     const int correctionTermsKernel = 3;
@@ -110,6 +111,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         spawnData = spawner.GetSpawnData();
         particleCount = spawnData.positions.Length;
         particleBuffer = ComputeHelper.CreateStructuredBuffer<ParticleData>(particleCount);
+        renderPositionBuffer = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         positionBuffer = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         entropyDataBuffer = ComputeHelper.CreateStructuredBuffer<ParticleEntropyData>(particleCount);
         gravityForceBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
@@ -140,6 +142,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.SetBuffer(compute, binaryTreeBuffer, "BinaryTreeBuffer", gravityKernel);
         ComputeHelper.SetBuffer(compute, renderBuffer1, "RenderBuffer", renderKernel);
         ComputeHelper.SetBuffer(compute, extraDataBuffer, "ParticleExtraBuffer", correctionTermsKernel, renderKernel, fusionKernel, neighbourDependentPropertiesKernel);
+        ComputeHelper.SetBuffer(compute, renderPositionBuffer, "RenderPositionBuffer", renderKernel, updatePositionKernel, UpdatePredictionsKernel);
         compute.SetInt("numParticles", particleCount);
 
         sorter = new();
@@ -189,7 +192,6 @@ public class NebulaParticleSimulator : MonoBehaviour
         RunSimulationStep();
     }
 
-    // NOTE: In the gravity and deltaTime reduction steps, those functions read buffer data back to the CPU which is whats taking the longest amount of time when running this (time on the CPU, not including GPU)
     // Dispatches the compute shader to run the simulation step
     void RunSimulationStep()
     {
@@ -288,12 +290,12 @@ public class NebulaParticleSimulator : MonoBehaviour
         ParticleEntropyData[] allEntropyData = new ParticleEntropyData[particleCount];
         ExtraParticleData[] allExtraData = new ExtraParticleData[particleCount];
         float4[] allPositions = new float4[particleCount];
+        float4[] renderPositions = new float4[particleCount];
 
         for (int i = 0; i < allParticles.Length; i++)
         {
             ParticleData particle = new ParticleData
             {
-                position = spawnData.positions[i],
                 velocity = spawnData.velocities[i],
                 entropy = 0.0f,
                 density = 0.0f,
@@ -322,6 +324,7 @@ public class NebulaParticleSimulator : MonoBehaviour
 
             float4 pos = new float4(spawnData.positions[i].x, spawnData.positions[i].y, spawnData.positions[i].z, spatialStage3Size);
             allPositions[i] = pos;
+            renderPositions[i] = pos;
         }
 
 
@@ -329,6 +332,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         entropyDataBuffer.SetData(allEntropyData);
         positionBuffer.SetData(allPositions);
         extraDataBuffer.SetData(allExtraData);
+        renderPositionBuffer.SetData(renderPositions);
 
         // temporary to test delta time buffer
         float[] deltaT = new float[1] { 0.007f };
@@ -394,7 +398,7 @@ public class NebulaParticleSimulator : MonoBehaviour
         ComputeHelper.Release(particleBuffer, ResultantForceBuffer, SpatialDataBuffer, SpatialOffsetsBuffer, 
                               entropyDataBuffer, gravityForceBuffer, gravityCorrectionBuffer,
                               globalDeltaTimeBuffer, renderBuffer1, renderBuffer2, positionBuffer,
-                              binaryTreeBuffer, mortonKeyBuffer, extraDataBuffer);
+                              binaryTreeBuffer, mortonKeyBuffer, extraDataBuffer, renderPositionBuffer);
         
         timestepManager.ReleaseBuffers();
         gravityReductionManager.ReleaseBuffers();
@@ -425,8 +429,7 @@ public struct SpatialData
 
 public struct  ParticleData
 {
-    public Vector3 position;
-    public Vector3 velocity;
+    public Vector4 velocity;
     public float density;
     public float entropy;
     public float hydroWeight;
