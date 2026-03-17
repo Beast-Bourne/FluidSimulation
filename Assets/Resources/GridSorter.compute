@@ -1,27 +1,8 @@
 #pragma kernel Sort
 #pragma kernel CalculateOffsets
-#pragma kernel Sort2
-#pragma kernel CalculateOffsets2
-#pragma kernel Sort3
-#pragma kernel CalculateOffsets3
 
-struct SpatialData
-{
-    uint index1;
-    uint hash1;
-    uint key1;
-    
-    uint index2;
-    uint hash2;
-    uint key2;
-    
-    uint index3;
-    uint hash3;
-    uint key3;
-};
-
-RWStructuredBuffer<SpatialData> Entries;
-RWStructuredBuffer<uint3> Offsets;
+RWStructuredBuffer<uint4> Entries; // .x is the particle index, .y is the spatial hash, .z is the key, and .w is padding
+RWStructuredBuffer<uint> Offsets;
 const uint numEntries;
 const uint groupWidth;
 const uint groupHeight;
@@ -41,22 +22,16 @@ void Sort(uint3 id : SV_DispatchThreadID)
 	// Exit if out of bounds (for non-power of 2 input sizes)
     if (indexRight >= numEntries) return;
 
-    uint valueLeft = Entries[indexLeft].key1;
-    uint valueRight = Entries[indexRight].key1;
+    uint valueLeft = Entries[indexLeft].z;
+    uint valueRight = Entries[indexRight].z;
 
 	// Swap entries if value is descending
     if (valueLeft > valueRight)
     {
-        uint3 temp = uint3(Entries[indexLeft].index1, Entries[indexLeft].hash1, Entries[indexLeft].key1);
+        uint4 temp = Entries[indexLeft];
         
-        Entries[indexLeft].index1 = Entries[indexRight].index1;
-        Entries[indexLeft].hash1 = Entries[indexRight].hash1;
-        Entries[indexLeft].key1 = Entries[indexRight].key1;
-        
-        
-        Entries[indexRight].index1 = temp.x;
-        Entries[indexRight].hash1 = temp.y;
-        Entries[indexRight].key1 = temp.z;
+        Entries[indexLeft] = Entries[indexRight];
+        Entries[indexRight] = temp;
     }
 }
 
@@ -73,110 +48,11 @@ void CalculateOffsets(uint3 id : SV_DispatchThreadID)
     uint i = id.x;
     uint null = numEntries;
 
-    uint key = Entries[i].key1;
-    uint keyPrev = (i == 0) ? null : Entries[i - 1].key1;
+    uint key = Entries[i].z;
+    uint keyPrev = (i == 0) ? null : Entries[i - 1].z;
 
     if (key != keyPrev)
     {
-        Offsets[key].x = i;
-    }
-}
-
-[numthreads(128, 1, 1)]
-void Sort2(uint3 id : SV_DispatchThreadID)
-{
-    uint i = id.x;
-
-    uint hIndex = i & (groupWidth - 1);
-    uint indexLeft = hIndex + (groupHeight + 1) * (i / groupWidth);
-    uint rightStepSize = stepIndex == 0 ? groupHeight - 2 * hIndex : (groupHeight + 1) / 2;
-    uint indexRight = indexLeft + rightStepSize;
-
-	// Exit if out of bounds (for non-power of 2 input sizes)
-    if (indexRight >= numEntries) return;
-
-    uint valueLeft = Entries[indexLeft].key2;
-    uint valueRight = Entries[indexRight].key2;
-
-	// Swap entries if value is descending
-    if (valueLeft > valueRight)
-    {
-        uint3 temp = uint3(Entries[indexLeft].index2, Entries[indexLeft].hash2, Entries[indexLeft].key2);
-        
-        Entries[indexLeft].index2 = Entries[indexRight].index2;
-        Entries[indexLeft].hash2 = Entries[indexRight].hash2;
-        Entries[indexLeft].key2 = Entries[indexRight].key2;
-        
-        
-        Entries[indexRight].index2 = temp.x;
-        Entries[indexRight].hash2 = temp.y;
-        Entries[indexRight].key2 = temp.z;
-    }
-}
-
-[numthreads(128, 1, 1)]
-void CalculateOffsets2(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= numEntries) return;
-
-    uint i = id.x;
-    uint null = numEntries;
-
-    uint key = Entries[i].key2;
-    uint keyPrev = (i == 0) ? null : Entries[i - 1].key2;
-
-    if (key != keyPrev)
-    {
-        Offsets[key].y = i;
-    }
-}
-
-[numthreads(128, 1, 1)]
-void Sort3(uint3 id : SV_DispatchThreadID)
-{
-    uint i = id.x;
-
-    uint hIndex = i & (groupWidth - 1);
-    uint indexLeft = hIndex + (groupHeight + 1) * (i / groupWidth);
-    uint rightStepSize = stepIndex == 0 ? groupHeight - 2 * hIndex : (groupHeight + 1) / 2;
-    uint indexRight = indexLeft + rightStepSize;
-
-	// Exit if out of bounds (for non-power of 2 input sizes)
-    if (indexRight >= numEntries)
-        return;
-
-    uint valueLeft = Entries[indexLeft].key3;
-    uint valueRight = Entries[indexRight].key3;
-
-	// Swap entries if value is descending
-    if (valueLeft > valueRight)
-    {
-        uint3 temp = uint3(Entries[indexLeft].index3, Entries[indexLeft].hash3, Entries[indexLeft].key3);
-        
-        Entries[indexLeft].index3 = Entries[indexRight].index3;
-        Entries[indexLeft].hash3 = Entries[indexRight].hash3;
-        Entries[indexLeft].key3 = Entries[indexRight].key3;
-        
-        
-        Entries[indexRight].index3 = temp.x;
-        Entries[indexRight].hash3 = temp.y;
-        Entries[indexRight].key3 = temp.z;
-    }
-}
-
-[numthreads(128, 1, 1)]
-void CalculateOffsets3(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= numEntries) return;
-
-    uint i = id.x;
-    uint null = numEntries;
-
-    uint key = Entries[i].key3;
-    uint keyPrev = (i == 0) ? null : Entries[i - 1].key3;
-
-    if (key != keyPrev)
-    {
-        Offsets[key].z = i;
+        Offsets[key] = i;
     }
 }

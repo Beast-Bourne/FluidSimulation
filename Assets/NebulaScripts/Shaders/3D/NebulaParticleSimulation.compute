@@ -53,22 +53,6 @@ struct BinaryTreeNode
     float4 centerOfMass;
 };
 
-// NOTE: use of 3 layer so spatial hashing is a limiting factor in the frame time
-struct SpatialData
-{
-    uint index1;
-    uint hash1;
-    uint key1;
-    
-    uint index2;
-    uint hash2;
-    uint key2;
-    
-    uint index3;
-    uint hash3;
-    uint key3;
-};
-
 static const int threadCount = 128;
 
 // property buffers
@@ -93,17 +77,15 @@ RWStructuredBuffer<float4> RenderBuffer;
 // Spatial hash buffers
 // SpatialDataBuffer[i] stores the spatial hash data for the particles. stores each layer for efficient access
 // SpatialOffsetDataBuffer[i] gives the index of the first particle in the SpatialDataBuffer buffer with the key matching the particle with index i
-RWStructuredBuffer<SpatialData> SpatialDataBuffer;
-RWStructuredBuffer<uint3> SpatialOffsetDataBuffer; // .x is the offset for stage 1, .y is the offset for stage 2, and .z is the offset for stage 3
+RWStructuredBuffer<uint4> SpatialDataBuffer; // .x is the particle index, .y is the spatial hash, .z is the key, and .w is padding
+RWStructuredBuffer<uint> SpatialOffsetDataBuffer;
 
 // octree buffers
 RWStructuredBuffer<BinaryTreeNode> BinaryTreeBuffer;
 
 // spatial hashing constants
-const float stage1Size;
-const float stage2Size;
-const float stage3Size;
-const float minSizeFactor;
+const float minSmoothRad;
+const float maxSmoothRad;
 
 // general constants
 const uint numParticles;
@@ -145,29 +127,6 @@ const float energyPerUnitMass;
 // render setting
 const int renderMode; // 0 = density, 1 = velocity, 2 = entropy, 3 = temperature, 4 = smoothing Radius, 5 = Hydrogen ratio
 
-uint3 GetIndexDataFromLayer(uint targetIndex, uint targetLayer)
-{
-    if (targetLayer == 1)
-    {
-        return uint3(SpatialDataBuffer[targetIndex].index1, SpatialDataBuffer[targetIndex].hash1, SpatialDataBuffer[targetIndex].key1);
-    }
-    else if (targetLayer == 2)
-    {
-        return uint3(SpatialDataBuffer[targetIndex].index2, SpatialDataBuffer[targetIndex].hash2, SpatialDataBuffer[targetIndex].key2);
-    }
-    else
-    {
-        return uint3(SpatialDataBuffer[targetIndex].index3, SpatialDataBuffer[targetIndex].hash3, SpatialDataBuffer[targetIndex].key3);
-    }
-}
-
-uint GetSpatialOffsetFromLayer(uint key, uint targetLayer)
-{
-    if (targetLayer == 1) return SpatialOffsetDataBuffer[key].x;
-    else if (targetLayer == 2) return SpatialOffsetDataBuffer[key].y;
-    else return SpatialOffsetDataBuffer[key].z;
-}
-
 float LambdaFunction(float temp)
 {
     return coolingLambda * pow(abs(temp), coolingAlpha);
@@ -200,18 +159,6 @@ float ApplyCooling(float entropy, float dens, float meanMolecularWeight, float t
     return (entropy - originEntropy);
 }
 
-float GetTargetLayerSize(float smoothRad)
-{
-    return (smoothRad <= stage1Size)? stage1Size :
-           (smoothRad <= stage2Size)? stage2Size :
-           stage3Size;
-}
-
-uint GetTargetLayer(float smoothRad)
-{
-    return (smoothRad <= stage1Size) ? 1 : (smoothRad <= stage2Size) ? 2 : 3;
-}
-
 float GetTargetSmoothRad(float density)
 {
     const float eta = 1.2f;
@@ -222,20 +169,19 @@ float GetTargetSmoothRad(float density)
 
 float CalculateParticlesDensity(float3 predPos, float smoothRad, uint particleIndex)
 {
-    int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(smoothRad));
+    int3 originGridPos = GetGridPos3D(predPos, maxSmoothRad);
     float density = 0;
     float sqrRadius = smoothRad * smoothRad;
-    uint spatialLayer = GetTargetLayer(smoothRad);
     
     for (int i = 0; i < 27; i++)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, spatialLayer);
+        uint index = SpatialOffsetDataBuffer[key];
         
         while (index < numParticles)
         {
-            uint3 indexData = GetIndexDataFromLayer(index, spatialLayer);
+            uint3 indexData = SpatialDataBuffer[index].xyz;
             index++;
             
             if (indexData[2] != key) break; // if the key is wrong then exit the loop
@@ -294,37 +240,18 @@ void UpdatePredictions(uint3 id : SV_DispatchThreadID)
 void UpdateGridHash(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
-    SpatialOffsetDataBuffer[id.x] = uint3(numParticles, numParticles, numParticles); // reset the offsets
+    
     uint index = id.x;
     float3 predPos = PositionBuffer[index].xyz; // get predicted position
     
-    SpatialData data;
-    
     // spatial hash stage 1
-    int3 gridPos = GetGridPos3D(predPos, stage1Size);
+    int3 gridPos = GetGridPos3D(predPos, maxSmoothRad);
     uint hash = HashGridPos3D(gridPos);
     uint key = KeyFromHash(hash, numParticles);
-    data.index1 = index;
-    data.hash1 = hash;
-    data.key1 = key;
+    uint4 hashData = uint4(index, hash, key, 0);
     
-    // spatial hash stage 2
-    int3 gridPos2 = GetGridPos3D(predPos, stage2Size);
-    uint hash2 = HashGridPos3D(gridPos2);
-    uint key2 = KeyFromHash(hash2, numParticles);
-    data.index2 = index;
-    data.hash2 = hash2;
-    data.key2 = key2;
-    
-    // spatial hash stage 3
-    int3 gridPos3 = GetGridPos3D(predPos, stage3Size);
-    uint hash3 = HashGridPos3D(gridPos3);
-    uint key3 = KeyFromHash(hash3, numParticles);
-    data.index3 = index;
-    data.hash3 = hash3;
-    data.key3 = key3;
-    
-    SpatialDataBuffer[id.x] = data;
+    SpatialDataBuffer[index] = hashData;
+    SpatialOffsetDataBuffer[index] = numParticles; // reset the offsets 
 }
 
 // kernel 2
@@ -349,7 +276,7 @@ void UpdateSmoothingRadii(uint3 id : SV_DispatchThreadID)
     }
     
     smoothRad = lerp(originSmoothRad, smoothRad, 0.005f);
-    smoothRad = clamp(smoothRad, stage1Size * minSizeFactor, stage3Size);
+    smoothRad = clamp(smoothRad, minSmoothRad, maxSmoothRad);
     
     particle.density = CalculateParticlesDensity(predPos, smoothRad, id.x);
     
@@ -371,8 +298,7 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
     
     float3 predPos = PositionBuffer[id.x].xyz;
     float smoothRad = PositionBuffer[id.x].w;
-    uint spatialLayer = GetTargetLayer(smoothRad);
-    int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(smoothRad));
+    int3 originGridPos = GetGridPos3D(predPos, maxSmoothRad);
     
     // variables for storing neighbour contributions
     float divV = 0.0f;
@@ -385,12 +311,12 @@ void CorrectionTerms(uint3 id : SV_DispatchThreadID)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, spatialLayer);
+        uint index = SpatialOffsetDataBuffer[key];
         
         while (index < numParticles)
         {
             // check for valid interaction
-            uint3 indexData = GetIndexDataFromLayer(index, spatialLayer);
+            uint3 indexData = SpatialDataBuffer[index].xyz;
             index++;
             
             if (indexData[2] != key) break;
@@ -533,8 +459,7 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
     float3 predPos = PositionBuffer[id.x].xyz;
     float smoothRad = PositionBuffer[id.x].w;
     
-    int3 originGridPos = GetGridPos3D(predPos, GetTargetLayerSize(smoothRad));
-    uint spatialLayer = GetTargetLayer(smoothRad);
+    int3 originGridPos = GetGridPos3D(predPos, maxSmoothRad);
     
     // variables for storing neighbour contributions
     float viscTerm = 0.0;
@@ -552,12 +477,12 @@ void NeighbourDependentProperties(uint3 id : SV_DispatchThreadID)
     {
         uint hash = HashGridPos3D(originGridPos + GridOffsets3D[i]);
         uint key = KeyFromHash(hash, numParticles);
-        uint index = GetSpatialOffsetFromLayer(key, spatialLayer);
+        uint index = SpatialOffsetDataBuffer[key];
         
         while (index < numParticles)
         {
             // check for valid interaction
-            uint3 indexData = GetIndexDataFromLayer(index, spatialLayer);
+            uint3 indexData = SpatialDataBuffer[index].xyz;
             index++;
             
             if (indexData[2] != key) break;

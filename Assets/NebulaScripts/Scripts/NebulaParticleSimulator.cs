@@ -45,10 +45,8 @@ public class NebulaParticleSimulator : MonoBehaviour
     public float boundSize;
 
     [Header("Smoothing Radius Settings")]
-    public float minFactor;
-    public float spatialStage1Size;
-    public float spatialStage2Size;
-    public float spatialStage3Size;
+    public float minimumSmoothingRadius;
+    public float maximumSmoothingRadius;
 
     [Header("Gravity Settings")]
     public float gravity;
@@ -119,8 +117,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         ResultantForceBuffer = ComputeHelper.CreateStructuredBuffer<float3>(particleCount);
         deltaTimeBuffer = ComputeHelper.CreateStructuredBuffer<float>(particleCount);
         globalDeltaTimeBuffer = ComputeHelper.CreateStructuredBuffer<float>(1);
-        SpatialDataBuffer = ComputeHelper.CreateStructuredBuffer<SpatialData>(particleCount);
-        SpatialOffsetsBuffer = ComputeHelper.CreateStructuredBuffer<uint3>(particleCount);
+        SpatialDataBuffer = ComputeHelper.CreateStructuredBuffer<uint4>(particleCount);
+        SpatialOffsetsBuffer = ComputeHelper.CreateStructuredBuffer<uint>(particleCount);
         renderBuffer1 = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         renderBuffer2 = ComputeHelper.CreateStructuredBuffer<float4>(particleCount);
         extraDataBuffer = ComputeHelper.CreateStructuredBuffer<ExtraParticleData>(particleCount);
@@ -267,10 +265,8 @@ public class NebulaParticleSimulator : MonoBehaviour
         compute.SetFloat("fusionRateCoefficient", rateCoefficient);
         compute.SetFloat("energyPerUnitMass", energyPerUnitMass);
 
-        compute.SetFloat("stage1Size", spatialStage1Size);
-        compute.SetFloat("stage2Size", spatialStage2Size);
-        compute.SetFloat("stage3Size", spatialStage3Size);
-        compute.SetFloat("minSizeFactor", minFactor);
+        compute.SetFloat("minSmoothRad", minimumSmoothingRadius);
+        compute.SetFloat("maxSmoothRad", maximumSmoothingRadius);
 
         compute.SetInt("renderMode", (int)display.displayMode);
 
@@ -322,7 +318,7 @@ public class NebulaParticleSimulator : MonoBehaviour
             };
             allExtraData[i] = extraData;
 
-            float4 pos = new float4(spawnData.positions[i].x, spawnData.positions[i].y, spawnData.positions[i].z, spatialStage3Size);
+            float4 pos = new float4(spawnData.positions[i].x, spawnData.positions[i].y, spawnData.positions[i].z, maximumSmoothingRadius);
             allPositions[i] = pos;
             renderPositions[i] = pos;
         }
@@ -410,21 +406,6 @@ public class NebulaParticleSimulator : MonoBehaviour
         Gizmos.color = Color.white;
         Gizmos.DrawWireCube(Vector3.zero, Vector3.one * boundSize * 2);
     }
-}
-
-public struct SpatialData
-{
-    uint index1;
-    uint hash1;
-    uint key1;
-
-    uint index2;
-    uint hash2;
-    uint key2;
-
-    uint index3;
-    uint hash3;
-    uint key3;
 }
 
 public struct  ParticleData

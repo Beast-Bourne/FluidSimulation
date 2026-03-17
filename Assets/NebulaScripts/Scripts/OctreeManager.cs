@@ -166,7 +166,7 @@ public class OctreeManager : MonoBehaviour
         if (Octree == null)
         {
             Gizmos.color = Color.white;
-            float boundSize = FindFirstObjectByType<NebulaParticleSimulator>().spatialStage1Size * LeafNodeSizeMuliplier * IntPow(2, NumOfLayers - 1);
+            float boundSize = FindFirstObjectByType<NebulaParticleSimulator>().maximumSmoothingRadius * LeafNodeSizeMuliplier * IntPow(2, NumOfLayers - 1);
             Gizmos.DrawWireCube(Vector3.zero, new Vector3(boundSize, boundSize, boundSize));
         }
     }

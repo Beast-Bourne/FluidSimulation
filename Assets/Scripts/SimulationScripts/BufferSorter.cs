@@ -5,10 +5,6 @@ public class BufferSorter
 {
     const int sortKernel = 0;
     const int offsetKernel = 1;
-    const int sort2Kernel = 2;
-    const int offset2Kernel = 3;
-    const int sort3Kernel = 4;
-    const int offset3Kernel = 5;
 
     readonly ComputeShader sortCompute;
     int indexBufferCount;
@@ -27,8 +23,8 @@ public class BufferSorter
     {
         indexBufferCount = indexBuffer.count;
 
-        ComputeHelper.SetBuffer(sortCompute, offsetBuffer, "Offsets", offsetKernel, offset2Kernel, offset3Kernel);
-        ComputeHelper.SetBuffer(sortCompute, indexBuffer, "Entries", offsetKernel, offset2Kernel, offset3Kernel, sortKernel, sort2Kernel, sort3Kernel);
+        ComputeHelper.SetBuffer(sortCompute, offsetBuffer, "Offsets", offsetKernel);
+        ComputeHelper.SetBuffer(sortCompute, indexBuffer, "Entries", offsetKernel, sortKernel);
 
         sortCompute.SetInt("numEntries", indexBufferCount);
         sortStageCount = (int)Log(NextPowerOfTwo(indexBufferCount), 2);
@@ -47,8 +43,6 @@ public class BufferSorter
                 sortCompute.SetInt("groupHeight", groupHeight);
                 sortCompute.SetInt("stepIndex", stepIndex);
                 ComputeHelper.Dispatch(sortCompute, NextPowerOfTwo(indexBufferCount) / 2, sortKernel);
-                ComputeHelper.Dispatch(sortCompute, NextPowerOfTwo(indexBufferCount) / 2, sort2Kernel);
-                ComputeHelper.Dispatch(sortCompute, NextPowerOfTwo(indexBufferCount) / 2, sort3Kernel);
             }
         }
     }
@@ -59,7 +53,5 @@ public class BufferSorter
         Sort();
 
         ComputeHelper.Dispatch(sortCompute, indexBufferCount, offsetKernel);
-        ComputeHelper.Dispatch(sortCompute, indexBufferCount, offset2Kernel);
-        ComputeHelper.Dispatch(sortCompute, indexBufferCount, offset3Kernel);
     }
 }
