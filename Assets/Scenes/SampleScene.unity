@@ -13871,11 +13871,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b9b0266f38cbc4749a8abb04c0633360, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particlesPerSide: 60
+  particlesPerSide: 75
   spawnCentre: {x: 0, y: 0, z: 0}
-  spawnSize: 120
+  spawnSize: 165
   VelocitySigma: 0
-  randomOffsetStrength: 1
+  randomOffsetStrength: 0.25
 --- !u!1 &1374176186
 GameObject:
   m_ObjectHideFlags: 0
@@ -13993,13 +13993,13 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 2b268572811b83a46b658f4fbabdd58b, type: 3}
   CFLScale: 0.8
   damping: 0.8
-  pressureMultiplier: 0.9
+  pressureMultiplier: 0.6
   adiabaticIndex: 1.4
   isPaused: 0
-  boundSize: 70
+  boundSize: 90
   minimumSmoothingRadius: 0.75
   maximumSmoothingRadius: 1.25
-  gravity: 0.0025
+  gravity: 0.001
   particleMass: 1
   barnesHutAccuracyThreshold: 0.75
   softeningLength: 0.01
@@ -14021,7 +14021,7 @@ MonoBehaviour:
   enableDataCollection: 0
   TimeBetweenSamples: 0.1
   TotalSampleTime: 60
-  logFileName: PredPosAndSmoothRadOwnBufferLog
+  logFileName: ParticleCount60fpsTest
 --- !u!1 &1417070273
 GameObject:
   m_ObjectHideFlags: 0
